@@ -1,0 +1,655 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>BioSense Simulator</title>
+  <meta name="description" content="Local engineering simulator for BioSense glucose, oxygen, and temperature channels. Simulation only. Not for medical use.">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true"></div>
+        <div>
+          <h1>BIOSENSE SIMULATOR</h1>
+          <p class="subtitle">Glucose, oxygen, and temperature sensor development environment</p>
+        </div>
+      </div>
+      <div class="badges">
+        <span class="badge badge-sim">SIMULATION ONLY</span>
+        <span class="badge badge-warn">NOT FOR MEDICAL USE</span>
+        <span class="badge" id="selftest-badge">SELF-TEST</span>
+      </div>
+    </header>
+
+    <p class="callout" lang="es">
+      Modelo provisional de simulación.
+      Glucosa, oxígeno y temperatura son canales independientes.
+      Ningún coeficiente de esta página es un dato médico ni una curva de electrodo real.
+    </p>
+    <p class="callout-en">
+      Provisional simulation model. Glucose and oxygen are independent electrochemical channels. Temperature is a third channel.
+      <span class="tag">SIMULATED</span>
+      <span class="tag">NOT FOR MEDICAL USE</span>
+      <span class="tag">PROVISIONAL</span>
+    </p>
+    <p class="reference" id="reference-line">Running self-test…</p>
+
+    <section class="chain-section" aria-label="Signal flow">
+      <div class="section-head">
+        <h2>BioSense sensor</h2>
+        <p>Three independent channels. Each block shows the live simulated value.</p>
+      </div>
+      <div class="alerts">
+        <p class="alert alert-sat" id="sat-alert" hidden>GLUCOSE TIA SATURATED</p>
+        <p class="alert alert-sat" id="alert-o-sat" hidden>OXYGEN TIA SATURATED</p>
+        <p class="alert alert-clip" id="adc-alert" hidden>GLUCOSE ADC CLIPPED</p>
+        <p class="alert alert-clip" id="alert-o-clip" hidden>OXYGEN ADC CLIPPED</p>
+      </div>
+      <div class="map-grid">
+        <div class="map-col">
+          <p class="map-label">GLUCOSE SENSOR</p>
+          <article class="block">
+            <h3>SENSOR</h3>
+            <p class="block-value" id="map-g-sensor">—</p>
+            <p class="block-unit">nA</p>
+          </article>
+          <div class="v-arrow" aria-hidden="true"></div>
+          <article class="block" id="block-g-tia">
+            <h3>GLUCOSE TIA</h3>
+            <p class="block-value" id="map-g-tia">—</p>
+            <p class="block-unit">V</p>
+          </article>
+          <div class="v-arrow" aria-hidden="true"></div>
+          <article class="block">
+            <h3>FILTER</h3>
+            <p class="block-value" id="map-g-filter">—</p>
+            <p class="block-unit">V</p>
+          </article>
+          <div class="v-arrow" aria-hidden="true"></div>
+          <article class="block" id="block-g-adc">
+            <h3>ADC CH1</h3>
+            <p class="block-value" id="map-g-adc">—</p>
+            <p class="block-unit">counts</p>
+          </article>
+        </div>
+        <div class="map-col">
+          <p class="map-label">OXYGEN SENSOR</p>
+          <article class="block">
+            <h3>SENSOR</h3>
+            <p class="block-value" id="map-o-sensor">—</p>
+            <p class="block-unit">nA · sim</p>
+          </article>
+          <div class="v-arrow" aria-hidden="true"></div>
+          <article class="block" id="block-o-tia">
+            <h3>OXYGEN TIA</h3>
+            <p class="block-value" id="map-o-tia">—</p>
+            <p class="block-unit">V</p>
+          </article>
+          <div class="v-arrow" aria-hidden="true"></div>
+          <article class="block">
+            <h3>FILTER</h3>
+            <p class="block-value" id="map-o-filter">—</p>
+            <p class="block-unit">V</p>
+          </article>
+          <div class="v-arrow" aria-hidden="true"></div>
+          <article class="block" id="block-o-adc">
+            <h3>ADC CH2</h3>
+            <p class="block-value" id="map-o-adc">—</p>
+            <p class="block-unit">counts</p>
+          </article>
+        </div>
+        <div class="map-col">
+          <p class="map-label">TEMPERATURE</p>
+          <article class="block">
+            <h3>SENSOR</h3>
+            <p class="block-value" id="map-t-sensor">—</p>
+            <p class="block-unit">°C</p>
+          </article>
+          <div class="v-arrow" aria-hidden="true"></div>
+          <article class="block">
+            <h3>TEMP CHANNEL</h3>
+            <p class="block-value" id="map-t-ch">CH3</p>
+            <p class="block-unit">PROVISIONAL</p>
+          </article>
+          <div class="v-arrow" aria-hidden="true"></div>
+          <article class="block">
+            <h3>ADC CH3</h3>
+            <p class="block-value" id="map-t-adc">—</p>
+            <p class="block-unit">placeholder</p>
+          </article>
+        </div>
+      </div>
+      <p class="map-join">BIOSENSE ALGORITHM</p>
+      <div class="map-results">
+        <article class="block">
+          <h3>ESTIMATED GLUCOSE</h3>
+          <p class="block-value" id="map-est-g">—</p>
+          <p class="block-unit">mg/dL · SIMULATED</p>
+        </article>
+        <article class="block">
+          <h3>OXYGEN READING</h3>
+          <p class="block-value" id="map-est-o">—</p>
+          <p class="block-unit">sim · PROVISIONAL</p>
+        </article>
+        <article class="block">
+          <h3>TEMPERATURE</h3>
+          <p class="block-value" id="map-est-t">—</p>
+          <p class="block-unit">°C</p>
+        </article>
+        <article class="block">
+          <h3>SIGNAL QUALITY</h3>
+          <p class="block-value" id="map-quality">—</p>
+          <p class="block-unit">GOOD / WARNING / INVALID</p>
+        </article>
+      </div>
+    </section>
+
+    <div class="workspace">
+      <div class="primary">
+        <section class="readouts trio" aria-label="Three sensor readings">
+          <article class="readout">
+            <h3>GLUCOSE <span class="tag">GLUCOSE CALIBRATION — PROVISIONAL</span></h3>
+            <p class="big" id="val-card-glucose">—</p>
+            <p class="unit">mg/dL</p>
+          </article>
+          <article class="readout">
+            <h3>OXYGEN <span class="tag">OXYGEN MODEL — PROVISIONAL</span></h3>
+            <p class="big" id="val-card-oxygen">—</p>
+            <p class="unit">sim · simulated unit</p>
+          </article>
+          <article class="readout">
+            <h3>TEMPERATURE <span class="tag">TEMPERATURE COMPENSATION — PROVISIONAL</span></h3>
+            <p class="big" id="val-card-temp">—</p>
+            <p class="unit">°C</p>
+            <p class="hint" id="quality-reasons">—</p>
+            <p class="quality" id="quality-badge">—</p>
+          </article>
+        </section>
+
+        <section class="panel" aria-label="Glucose and simulation">
+          <div class="panel-head">
+            <h2>Glucose model</h2>
+            <p class="status" id="sim-status">IDLE</p>
+          </div>
+          <label class="field" for="glucose-slider">
+            <span class="field-label">Simulated glucose <span class="range">40 – 400 mg/dL</span></span>
+            <span class="pair">
+              <input id="glucose-slider" type="range" min="40" max="400" step="1" value="200">
+              <input id="glucose-num" type="number" min="40" max="400" step="1" value="200" inputmode="decimal" autocomplete="off">
+              <span class="suffix">mg/dL</span>
+            </span>
+          </label>
+          <p class="mmol" id="val-mmol">— mmol/L</p>
+          <p class="hint">mmol/L = mg/dL / 18.01559. The scenario drives this value when it is not Stable or Custom.</p>
+
+          <div class="sim-bar">
+            <label class="field grow" for="scenario">
+              <span class="field-label">Scenario <span class="range">simulated signals only</span></span>
+              <select id="scenario"></select>
+            </label>
+            <div class="sim-actions">
+              <button type="button" class="primary" id="btn-start">START SIMULATION</button>
+              <button type="button" id="btn-pause" disabled>PAUSE</button>
+              <button type="button" id="btn-stop" disabled>STOP & ANALYZE</button>
+              <button type="button" id="btn-reset">RESET</button>
+            </div>
+          </div>
+          <p class="scenario-copy" id="scenario-copy"></p>
+          <p class="clock" id="sim-clock">t = 0.0 s · step 0.1 s · buffer 120 s · charts 60 s</p>
+        </section>
+
+        <section class="readouts" aria-label="Results">
+          <article class="readout">
+            <h3>Actual glucose <span class="tag">SIMULATED</span></h3>
+            <p class="big" id="val-actual">—</p>
+            <p class="unit">mg/dL</p>
+          </article>
+          <article class="readout">
+            <h3>Estimated glucose <span class="tag">NOT FOR MEDICAL USE</span></h3>
+            <p class="big" id="val-estimated">—</p>
+            <p class="unit">mg/dL · SIMULATED</p>
+          </article>
+          <article class="readout">
+            <h3>Absolute error</h3>
+            <p class="big" id="val-abs">—</p>
+            <p class="unit">mg/dL</p>
+          </article>
+          <article class="readout">
+            <h3>Percentage error</h3>
+            <p class="big" id="val-pct">—</p>
+            <p class="unit">% of actual</p>
+          </article>
+        </section>
+
+        <dl class="strip" aria-label="Intermediate signals">
+          <div><dt>Raw current</dt><dd id="d-raw">—</dd></div>
+          <div><dt>Temperature compensated</dt><dd id="d-comp">—</dd></div>
+          <div><dt>Recovered current</dt><dd id="d-recovered">—</dd></div>
+          <div><dt>Current error</dt><dd id="d-current-error">—</dd></div>
+          <div><dt>VREF</dt><dd id="d-vref">—</dd></div>
+          <div><dt>VOUT</dt><dd id="d-vout">—</dd></div>
+          <div><dt>ADC count</dt><dd id="d-adc-count">—</dd></div>
+          <div><dt>ADC maximum</dt><dd id="d-adc-max">—</dd></div>
+          <div><dt>ADC LSB</dt><dd id="d-lsb">—</dd></div>
+          <div><dt>Voltage reconstructed</dt><dd id="d-vadc">—</dd></div>
+          <div><dt>Glucose fc</dt><dd id="d-fc">—</dd></div>
+          <div><dt>Glucose RC</dt><dd id="d-rc">—</dd></div>
+          <div><dt>Oxygen current</dt><dd id="d-o2-current">—</dd></div>
+          <div><dt>Oxygen TIA VOUT</dt><dd id="d-o2-vout">—</dd></div>
+          <div><dt>ADC CH2</dt><dd id="d-o2-adc">—</dd></div>
+          <div><dt>Oxygen fc</dt><dd id="d-o2-fc">—</dd></div>
+        </dl>
+
+        <section class="chart-grid" aria-label="Charts">
+          <article class="chart-card">
+            <header>
+              <h3>GLUCOSE ESTIMATION</h3>
+              <p>Actual glucose vs estimated glucose</p>
+            </header>
+            <div class="chart-box"><canvas id="chart-glucose" aria-label="Actual and estimated glucose"></canvas></div>
+          </article>
+          <article class="chart-card">
+            <header>
+              <h3>GLUCOSE CURRENT</h3>
+              <p>Sensor current vs recovered current</p>
+            </header>
+            <div class="chart-box"><canvas id="chart-current" aria-label="Sensor current"></canvas></div>
+          </article>
+          <article class="chart-card">
+            <header>
+              <h3>GLUCOSE TIA VOUT</h3>
+              <p>TIA voltage vs filtered voltage</p>
+            </header>
+            <div class="chart-box"><canvas id="chart-vout" aria-label="TIA output voltage"></canvas></div>
+          </article>
+          <article class="chart-card">
+            <header>
+              <h3>ADC CH1 / CH2</h3>
+              <p>Glucose and oxygen counts</p>
+            </header>
+            <div class="chart-box"><canvas id="chart-adc" aria-label="ADC channel counts"></canvas></div>
+          </article>
+          <article class="chart-card">
+            <header>
+              <h3>OXYGEN SIGNAL</h3>
+              <p>Oxygen level vs recovered oxygen · sim</p>
+            </header>
+            <div class="chart-box"><canvas id="chart-oxygen" aria-label="Oxygen signal"></canvas></div>
+          </article>
+          <article class="chart-card">
+            <header>
+              <h3>OXYGEN CURRENT</h3>
+              <p>Oxygen sensor current</p>
+            </header>
+            <div class="chart-box"><canvas id="chart-oxygen-current" aria-label="Oxygen sensor current"></canvas></div>
+          </article>
+          <article class="chart-card">
+            <header>
+              <h3>OXYGEN TIA VOUT</h3>
+              <p>Oxygen TIA voltage vs filtered voltage</p>
+            </header>
+            <div class="chart-box"><canvas id="chart-oxygen-vout" aria-label="Oxygen TIA output"></canvas></div>
+          </article>
+          <article class="chart-card">
+            <header>
+              <h3>ENVIRONMENT</h3>
+              <p>Oxygen and temperature on separate axes</p>
+            </header>
+            <div class="chart-box"><canvas id="chart-environment" aria-label="Oxygen and temperature"></canvas></div>
+          </article>
+        </section>
+        <p class="hint" id="charts-note">Charts show the last 60 s once the simulation is running. Noise is applied only while running, and only to each sensor current.</p>
+      </div>
+
+      <aside class="params" aria-label="Parameters">
+        <section class="panel">
+          <h2>Presets</h2>
+          <div class="preset-grid" id="presets">
+            <button type="button" data-preset="ideal">IDEAL SENSOR</button>
+            <button type="button" data-preset="low-noise">LOW NOISE</button>
+            <button type="button" data-preset="high-noise">HIGH NOISE</button>
+            <button type="button" data-preset="drift">DRIFT TEST</button>
+            <button type="button" data-preset="adc12">ADC 12 BIT</button>
+            <button type="button" data-preset="adc16">ADC 16 BIT</button>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>Glucose sensor</h2>
+          <p class="provisional">GLUCOSE CALIBRATION — PROVISIONAL. Not a characterized electrode.</p>
+          <label class="field" for="sensitivity">
+            <span class="field-label">Sensitivity <span class="range">nA/(mg/dL)</span></span>
+            <input id="sensitivity" type="number" min="0.01" max="20" step="0.01" value="1">
+          </label>
+          <label class="field" for="baseline">
+            <span class="field-label">Baseline current <span class="range">nA</span></span>
+            <input id="baseline" type="number" min="-200" max="200" step="0.1" value="0">
+          </label>
+          <label class="field" for="noise-slider">
+            <span class="field-label">Noise RMS <span class="range">0 – 50 nA</span></span>
+            <span class="pair">
+              <input id="noise-slider" type="range" min="0" max="50" step="0.1" value="0">
+              <input id="noise-num" type="number" min="0" max="50" step="0.1" value="0" inputmode="decimal" autocomplete="off">
+            </span>
+          </label>
+          <label class="field" for="drift-slider">
+            <span class="field-label">Drift <span class="range">−50 – +50 nA</span></span>
+            <span class="pair">
+              <input id="drift-slider" type="range" min="-50" max="50" step="0.5" value="0">
+              <input id="drift-num" type="number" min="-50" max="50" step="0.5" value="0" inputmode="decimal" autocomplete="off">
+            </span>
+          </label>
+          <p class="formula">I_sensor = glucose · sensitivity + baseline + drift + noise</p>
+          <p class="hint">Baseline and drift are subtracted in the estimate using these configured values. Noise is not removed. Noise changes only while the simulation runs.</p>
+        </section>
+
+        <section class="panel">
+          <h2>Glucose TIA</h2>
+          <p class="static-line">VCC <strong id="vcc-readout">3.3 V</strong></p>
+          <label class="field" for="vref">
+            <span class="field-label">VREF <span class="range">V</span></span>
+            <input id="vref" type="number" min="0" max="3.3" step="0.01" value="1.65">
+          </label>
+          <label class="field" for="rf">
+            <span class="field-label">RF</span>
+            <select id="rf"></select>
+          </label>
+          <label class="field" for="cf">
+            <span class="field-label">CF</span>
+            <select id="cf"></select>
+          </label>
+          <p class="static-line">fc <strong id="fc-readout">—</strong> · RC <strong id="rc-readout">—</strong></p>
+          <p class="formula">VOUT = VREF + I(A) · RF</p>
+          <p class="formula">fc = 1 / (2π · RF · CF)</p>
+          <p class="hint">nA is converted to A before the gain. The discrete low-pass runs on VOUT during the simulation. Raise CF to see the lag. This TIA does not share state with the oxygen TIA.</p>
+        </section>
+
+        <section class="panel">
+          <h2>Oxygen sensor</h2>
+          <p class="provisional">OXYGEN MODEL — PROVISIONAL. Unit “sim” is a simulation scale, not mmHg and not saturation.</p>
+          <label class="field" for="oxygen-slider">
+            <span class="field-label">Oxygen level <span class="range">0 – 100 sim</span></span>
+            <span class="pair">
+              <input id="oxygen-slider" type="range" min="0" max="100" step="1" value="50">
+              <input id="oxygen-num" type="number" min="0" max="100" step="1" value="50" inputmode="decimal" autocomplete="off">
+              <span class="suffix">sim</span>
+            </span>
+          </label>
+          <label class="field" for="o2-sensitivity">
+            <span class="field-label">Sensitivity <span class="range">nA/sim · PROVISIONAL</span></span>
+            <input id="o2-sensitivity" type="number" min="0.01" max="20" step="0.01" value="1">
+          </label>
+          <label class="field" for="o2-baseline">
+            <span class="field-label">Baseline current <span class="range">nA</span></span>
+            <input id="o2-baseline" type="number" min="-200" max="200" step="0.1" value="0">
+          </label>
+          <label class="field" for="o2-noise-slider">
+            <span class="field-label">Noise RMS <span class="range">0 – 50 nA</span></span>
+            <span class="pair">
+              <input id="o2-noise-slider" type="range" min="0" max="50" step="0.1" value="0">
+              <input id="o2-noise-num" type="number" min="0" max="50" step="0.1" value="0" inputmode="decimal" autocomplete="off">
+            </span>
+          </label>
+          <label class="field" for="o2-drift-slider">
+            <span class="field-label">Drift <span class="range">−50 – +50 nA</span></span>
+            <span class="pair">
+              <input id="o2-drift-slider" type="range" min="-50" max="50" step="0.5" value="0">
+              <input id="o2-drift-num" type="number" min="-50" max="50" step="0.5" value="0" inputmode="decimal" autocomplete="off">
+            </span>
+          </label>
+          <p class="static-line">VCC <strong id="vcc-readout-o2">3.3 V</strong></p>
+          <label class="field" for="o2-vref">
+            <span class="field-label">Oxygen TIA VREF <span class="range">V</span></span>
+            <input id="o2-vref" type="number" min="0" max="3.3" step="0.01" value="1.65">
+          </label>
+          <label class="field" for="o2-rf">
+            <span class="field-label">Oxygen TIA RF</span>
+            <select id="o2-rf"></select>
+          </label>
+          <label class="field" for="o2-cf">
+            <span class="field-label">Oxygen TIA CF</span>
+            <select id="o2-cf"></select>
+          </label>
+          <p class="static-line">fc <strong id="o2-fc">—</strong> · RC <strong id="o2-rc">—</strong></p>
+          <p class="formula">I_oxygen = level · sensitivity + baseline + drift + noise</p>
+          <label class="toggle" for="o2-influence">
+            <input id="o2-influence" type="checkbox">
+            <span>OXYGEN → GLUCOSE INFLUENCE</span>
+          </label>
+          <label class="field" for="o2-influence-coeff">
+            <span class="field-label">Oxygen influence coefficient <span class="range">% per sim · default 0</span></span>
+            <input id="o2-influence-coeff" type="number" min="-5" max="5" step="0.01" value="0" disabled>
+          </label>
+          <p class="provisional">O2 COMPENSATION MODEL: PROVISIONAL. Off, or a coefficient of 0, leaves the glucose channel unchanged. This is not a glucose-oxidase model.</p>
+        </section>
+
+        <section class="panel">
+          <h2>ADC</h2>
+          <p class="hint">One converter, three channels. CH1 glucose, CH2 oxygen, CH3 temperature placeholder. Bits and ADC reference are shared. Counts are independent.</p>
+          <label class="field" for="adc-bits">
+            <span class="field-label">Resolution</span>
+            <select id="adc-bits"></select>
+          </label>
+          <label class="field" for="adc-vref">
+            <span class="field-label">Reference voltage <span class="range">V</span></span>
+            <input id="adc-vref" type="number" min="0.5" max="5" step="0.01" value="3.3">
+          </label>
+          <p class="formula">count = round(VOUT / VREF_ADC · (2^N − 1))</p>
+          <p class="formula">V_ADC = count / (2^N − 1) · VREF_ADC</p>
+        </section>
+
+        <section class="panel">
+          <h2>Environment</h2>
+          <label class="field" for="temp-slider">
+            <span class="field-label">Temperature <span class="range">30 – 42 °C</span></span>
+            <span class="pair">
+              <input id="temp-slider" type="range" min="30" max="42" step="0.1" value="37">
+              <input id="temp-num" type="number" min="30" max="42" step="0.1" value="37" inputmode="decimal" autocomplete="off">
+              <span class="suffix">°C</span>
+            </span>
+          </label>
+          <label class="field" for="temp-coeff">
+            <span class="field-label">Temperature coefficient <span class="range">PROVISIONAL %/°C</span></span>
+            <input id="temp-coeff" type="number" min="-5" max="5" step="0.01" value="0">
+          </label>
+          <p class="formula">factor = 1 + (k/100) · (T − 37)</p>
+          <p class="provisional">TEMPERATURE COMPENSATION — PROVISIONAL. k = 0 disables the effect. This is not a medical temperature compensation. The physical glucose current is multiplied by the factor; the algorithm divides it back out.</p>
+        </section>
+      </aside>
+    </div>
+
+    <section class="panel metrics" aria-label="Metrics">
+      <div class="section-head">
+        <h2>Metrics</h2>
+        <p id="m-n">No samples yet. Metrics use the 120 s history buffer.</p>
+      </div>
+      <div class="metric-grid">
+        <article><h3>Mean error</h3><p id="m-mean">—</p><span>mg/dL</span></article>
+        <article><h3>Mean absolute error</h3><p id="m-mae">—</p><span>mg/dL</span></article>
+        <article><h3>RMSE</h3><p id="m-rmse">—</p><span>mg/dL</span></article>
+        <article><h3>Maximum error</h3><p id="m-max">—</p><span>mg/dL · |error|</span></article>
+        <article><h3>ADC quantization error</h3><p id="m-quant">—</p><span>µV · mean |V − V_ADC|</span></article>
+        <article><h3>Glucose TIA saturation</h3><p id="m-sat">0</p><span>samples since reset</span></article>
+        <article><h3>Oxygen TIA saturation</h3><p id="m-sat-o2">0</p><span>samples since reset</span></article>
+        <article><h3>Glucose ADC clipping</h3><p id="m-clip-g">0</p><span>samples since reset</span></article>
+        <article><h3>Oxygen ADC clipping</h3><p id="m-clip-o2">0</p><span>samples since reset</span></article>
+        <article><h3>Glucose noise RMS</h3><p id="m-noise-g">—</p><span>nA · buffer</span></article>
+        <article><h3>Oxygen noise RMS</h3><p id="m-noise-o2">—</p><span>nA · buffer</span></article>
+      </div>
+    </section>
+
+    <section class="panel results-panel" id="results-panel" aria-label="Simulation results" hidden>
+      <div class="section-head">
+        <h2>Simulation results</h2>
+        <p id="res-status">No finished session.</p>
+      </div>
+      <p class="hint">SIMULATED · NOT FOR MEDICAL USE · PROVISIONAL. Full-run metrics use every sample from START to STOP, not the 120 s chart buffer.</p>
+      <p class="quality" id="res-quality">—</p>
+      <p class="hint" id="res-reasons"></p>
+      <div class="metric-grid results-kpis">
+        <article><h3>Simulation ID</h3><p id="res-id">—</p><span>session</span></article>
+        <article><h3>Date / time</h3><p id="res-datetime">—</p><span>local</span></article>
+        <article><h3>Duration</h3><p id="res-duration">—</p><span>s</span></article>
+        <article><h3>Samples</h3><p id="res-samples">—</p><span>full run</span></article>
+        <article><h3>Sampling interval</h3><p id="res-interval">—</p><span>s</span></article>
+        <article><h3>Signal quality</h3><p id="res-quality-kpi">—</p><span>engineering, not medical</span></article>
+        <article><h3>Glucose MAE</h3><p id="res-mae">—</p><span>mg/dL</span></article>
+        <article><h3>Glucose RMSE</h3><p id="res-rmse">—</p><span>mg/dL</span></article>
+        <article><h3>Max |error|</h3><p id="res-max">—</p><span>mg/dL</span></article>
+        <article><h3>Oxygen MAE</h3><p id="res-o-mae">—</p><span>sim · PROVISIONAL</span></article>
+        <article><h3>Mean temperature</h3><p id="res-temp">—</p><span>°C</span></article>
+        <article><h3>Exports</h3><p id="res-exported">Not exported</p><span>this session</span></article>
+      </div>
+      <div class="sim-actions results-actions">
+        <button type="button" class="primary" id="btn-export-pdf" disabled>EXPORT PDF</button>
+        <button type="button" id="btn-export-raw" disabled>EXPORT RAW CSV</button>
+        <button type="button" id="btn-export-summary" disabled>EXPORT SUMMARY CSV</button>
+        <button type="button" id="btn-export-json" disabled>EXPORT JSON</button>
+        <button type="button" id="btn-export-report" disabled>EXPORT HTML</button>
+      </div>
+      <p class="hint" id="res-export-note">EXPORT PDF downloads one standalone report. CSV and JSON remain available if you need the raw numbers.</p>
+      <details class="results-details">
+        <summary>FULL SESSION METRICS</summary>
+        <div id="results-full" class="results-full"></div>
+      </details>
+    </section>
+
+    <section class="panel" aria-label="Calibration sweep">
+      <div class="section-head">
+        <h2>Calibration sweep</h2>
+        <div class="sim-actions">
+          <button type="button" class="primary" id="btn-sweep">RUN CALIBRATION SWEEP</button>
+          <button type="button" id="btn-export" disabled>Export CSV</button>
+        </div>
+      </div>
+      <p class="hint" id="sweep-note">Steady-state points at the current electronics settings. Noise is off so the table is repeatable. Baseline and drift are removed with the configured model. SIMULATED · NOT FOR MEDICAL USE.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Actual glucose</th>
+              <th>Sensor current</th>
+              <th>VOUT</th>
+              <th>ADC</th>
+              <th>Estimated glucose</th>
+              <th>Error</th>
+            </tr>
+          </thead>
+          <tbody id="sweep-body">
+            <tr><td colspan="6" class="empty">No sweep yet.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="hint" id="sweep-summary"></p>
+    </section>
+
+    <section class="panel" aria-label="Experiments">
+      <div class="section-head">
+        <h2>Experiments</h2>
+        <div class="sim-actions">
+          <button type="button" id="btn-exp1">EXPERIMENT 1</button>
+          <button type="button" id="btn-exp2">EXPERIMENT 2</button>
+          <button type="button" id="btn-exp3">EXPERIMENT 3</button>
+          <button type="button" id="btn-exp4">EXPERIMENT 4</button>
+          <button type="button" id="btn-export-exp" disabled>EXPORT CSV</button>
+        </div>
+      </div>
+      <p class="hint">Steady-state points from 0 to 120 s. They use the current electronics and the oxygen-influence toggle. Experiments 1–3 force noise and drift to 0. SIMULATED · NOT FOR MEDICAL USE.</p>
+      <p class="hint">1 Constant glucose / variable oxygen · 2 Constant glucose / variable temperature · 3 Constant environment / variable glucose · 4 Combined disturbance.</p>
+      <p class="hint" id="exp-note"></p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Actual glucose</th>
+              <th>Oxygen</th>
+              <th>Temperature</th>
+              <th>Glucose current</th>
+              <th>Oxygen current</th>
+              <th>Glucose VOUT</th>
+              <th>Oxygen VOUT</th>
+              <th>ADC CH1</th>
+              <th>ADC CH2</th>
+              <th>Estimated glucose</th>
+              <th>Error</th>
+              <th>Signal quality</th>
+            </tr>
+          </thead>
+          <tbody id="exp-body">
+            <tr><td colspan="13" class="empty">No experiment yet.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="hint" id="exp-summary"></p>
+    </section>
+
+    <details class="panel debug" id="debug-panel">
+      <summary>ENGINEERING DEBUG</summary>
+      <h3 class="debug-title">Glucose channel</h3>
+      <dl class="debug-grid" id="debug-grid">
+        <div><dt>Glucose mg/dL</dt><dd id="dbg-glucose-mg">—</dd></div>
+        <div><dt>Glucose mmol/L</dt><dd id="dbg-glucose-mmol">—</dd></div>
+        <div><dt>Sensor current A</dt><dd id="dbg-current-a">—</dd></div>
+        <div><dt>Sensor current nA</dt><dd id="dbg-current-na">—</dd></div>
+        <div><dt>VREF</dt><dd id="dbg-vref">—</dd></div>
+        <div><dt>RF</dt><dd id="dbg-rf">—</dd></div>
+        <div><dt>CF</dt><dd id="dbg-cf">—</dd></div>
+        <div><dt>RC</dt><dd id="dbg-rc">—</dd></div>
+        <div><dt>fc</dt><dd id="dbg-fc">—</dd></div>
+        <div><dt>TIA raw voltage</dt><dd id="dbg-tia-raw">—</dd></div>
+        <div><dt>Filtered voltage</dt><dd id="dbg-filtered">—</dd></div>
+        <div><dt>ADC bits</dt><dd id="dbg-bits">—</dd></div>
+        <div><dt>ADC LSB</dt><dd id="dbg-lsb">—</dd></div>
+        <div><dt>ADC count</dt><dd id="dbg-count">—</dd></div>
+        <div><dt>ADC reconstructed voltage</dt><dd id="dbg-vadc">—</dd></div>
+        <div><dt>Recovered current</dt><dd id="dbg-recovered">—</dd></div>
+        <div><dt>Estimated glucose</dt><dd id="dbg-estimated">—</dd></div>
+        <div><dt>Error</dt><dd id="dbg-error">—</dd></div>
+        <div><dt>Noise sample</dt><dd id="dbg-noise">—</dd></div>
+        <div><dt>Filter alpha</dt><dd id="dbg-alpha">—</dd></div>
+      </dl>
+      <h3 class="debug-title">Oxygen channel</h3>
+      <dl class="debug-grid">
+        <div><dt>Oxygen level</dt><dd id="dbg-o2-level">—</dd></div>
+        <div><dt>Sensor current</dt><dd id="dbg-o2-current">—</dd></div>
+        <div><dt>Noise sample</dt><dd id="dbg-o2-noise">—</dd></div>
+        <div><dt>Drift</dt><dd id="dbg-o2-drift">—</dd></div>
+        <div><dt>TIA VOUT</dt><dd id="dbg-o2-tia">—</dd></div>
+        <div><dt>Filtered VOUT</dt><dd id="dbg-o2-filt">—</dd></div>
+        <div><dt>ADC CH2</dt><dd id="dbg-o2-adc">—</dd></div>
+        <div><dt>Recovered oxygen signal</dt><dd id="dbg-o2-rec">—</dd></div>
+      </dl>
+      <h3 class="debug-title">Temperature channel</h3>
+      <dl class="debug-grid">
+        <div><dt>Temperature</dt><dd id="dbg-temp">—</dd></div>
+        <div><dt>Temperature coefficient</dt><dd id="dbg-temp-coeff">—</dd></div>
+        <div><dt>Temperature correction</dt><dd id="dbg-temp-corr">—</dd></div>
+      </dl>
+      <h3 class="debug-title">BioSense algorithm</h3>
+      <dl class="debug-grid">
+        <div><dt>Raw glucose</dt><dd id="dbg-alg-raw">—</dd></div>
+        <div><dt>Oxygen correction</dt><dd id="dbg-alg-o2">—</dd></div>
+        <div><dt>Temperature correction</dt><dd id="dbg-alg-temp">—</dd></div>
+        <div><dt>Estimated glucose</dt><dd id="dbg-alg-est">—</dd></div>
+        <div><dt>Error</dt><dd id="dbg-alg-err">—</dd></div>
+        <div><dt>Signal quality</dt><dd id="dbg-alg-q">—</dd></div>
+      </dl>
+      <h3 class="debug-title">Internal checks</h3>
+      <p id="selftest-summary"></p>
+      <ul class="checks" id="selftest-list"></ul>
+    </details>
+
+    <footer class="footer">
+      <p><strong>SIMULATED · NOT FOR MEDICAL USE.</strong> BioSense Simulator is an engineering bench for three channels: glucose, oxygen, and temperature. It does not measure tissue and it does not produce clinical guidance.</p>
+      <p>GLUCOSE CALIBRATION — PROVISIONAL. OXYGEN MODEL — PROVISIONAL. TEMPERATURE COMPENSATION — PROVISIONAL. None of these coefficients is a characterized sensor.</p>
+    </footer>
+  </div>
+  <script src="vendor/chart.umd.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
