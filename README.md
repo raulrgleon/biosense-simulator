@@ -50,6 +50,7 @@ Chart.js 4.4.6 está incluido en `vendor/chart.umd.min.js` (licencia MIT). La ap
 | `BioSenseAlgorithm` | glucosa estimada, oxígeno estimado, temperatura y calidad de señal |
 | `SimulationEngine` | Escenarios, paso de 0.1 s, buffer de 120 s |
 | `SimulationSession` | Registro completo de la ejecución, métricas finales y exportaciones |
+| `TransientAnalysis` | Respuesta a escalón y seguimiento continuo sobre `SimulationSession.samples` |
 | `ExperimentEngine` | Cuatro barridos en estado estacionario |
 | `Charts` | Glucosa, oxígeno y entorno. Ventana de 60 s |
 | `UI` | Controles, formato, barrido y experimentos |
@@ -203,10 +204,10 @@ Son señales de prueba, no registros clínicos:
 - Rising glucose: 80 → 300 mg/dL en 120 s
 - Falling glucose: 340 → 60 mg/dL en 120 s
 - Meal spike: subida simulada a 280 mg/dL y bajada a 150
-- Hypothetical rapid change: escalones para estresar filtro y ADC
+- Hypothetical rapid change: escalones **artificiales** para estresar filtro y ADC. La glucosa verdadera salta de golpe cada 10 s. No es una señal fisiológica.
 - Custom: el slider manda mientras corre la simulación
 
-Las gráficas guardan como máximo 120 s y dibujan los últimos 60 s.
+Las gráficas guardan como máximo 120 s y dibujan los últimos 60 s. El análisis transitorio usa **toda** la sesión, no ese buffer.
 
 ## Barrido de calibración
 
@@ -250,5 +251,42 @@ El panel muestra duración, número de muestras, calidad de señal y métricas d
 - `biosense_simulation_YYYY-MM-DD_HH-MM-SS_summary.csv`
 - `biosense_simulation_YYYY-MM-DD_HH-MM-SS.json`
 - `biosense_simulation_YYYY-MM-DD_HH-MM-SS_report.html`
+- `biosense_simulation_YYYY-MM-DD_HH-MM-SS_transitions.csv` — un evento de escalón por fila; solo cabecera si no hay escalones
 
 **EXPORT PDF** descarga un solo archivo con configuración, métricas, avisos y gráficas del run completo. CSV y JSON siguen disponibles si hace falta análisis posterior.
+
+## Transient Response Analysis
+
+Tras **STOP & ANALYZE** el simulador distingue dos cosas distintas:
+
+1. **Error en estado estacionario** — precisión cuando la glucosa real ya no cambia.
+2. **Error transitorio** — retraso del filtro y de la cadena de señal cuando la glucosa real sí cambia.
+
+Hay dos análisis, porque no todos los escenarios son escalones:
+
+**A. Respuesta a escalón (`transientAnalysis`)**
+
+Se detecta un escalón solo si `|actual[n] − actual[n−1]| ≥ 5 mg/dL`. El escenario *rapid* genera esos saltos cada 10 s. *Rising*, *falling* y *meal* usan curvas suaves `ease01()` y **no** deben producir una tormenta de eventos.
+
+Para cada escalón se calcula:
+
+- tiempo de establecimiento ±5 mg/dL, con 1.0 s seguido dentro de la banda (el número de muestras sale del `dt` real, no está fijado a 10)
+- tiempo de establecimiento ±2 %, con banda `max(|target| · 0.02, 1.0)` y la misma regla de 1.0 s
+- tiempo de subida 10–90 % o de bajada 90–10 %, con interpolación lineal entre muestras
+- error de pico, MAE y RMSE **del evento** (no sustituyen el MAE/RMSE de la sesión)
+- overshoot (subida) / undershoot (bajada)
+- error medio y MAE en estado estacionario **después** de establecerse a ±5 mg/dL
+
+Si no entra en banda antes del siguiente escalón, `settling_time = null` y el estado es `NOT_SETTLED_BEFORE_NEXT_STEP`.
+
+**B. Seguimiento continuo (`trackingAnalysis`)**
+
+Para rampas suaves. Una muestra se considera en movimiento si la derivada de la glucosa **real** supera 0.25 mg/dL/s. Ese umbral es de análisis de simulación, no médico. También se estima un retardo de ingeniería (0 a 5 s) que minimiza el RMSE entre `estimated(t)` y `actual(t − lag)`.
+
+**Respuesta RC teórica**
+
+En el panel se muestran RC, fc, `dt`, alpha y los tiempos de primer orden `t63.2 ≈ τ`, `t90 ≈ 2.303 τ`, `t95 ≈ 2.996 τ`, `t98 ≈ 3.912 τ`. Son valores teóricos del filtro electrónico. **No** son la respuesta de un sensor electroquímico real: esa dinámica todavía no está modelada.
+
+El escenario *rapid* cambia la glucosa verdadera de forma instantánea. El error transitorio grande mide sobre todo la cadena filtro/ADC ante un escalón artificial.
+
+> Step-response metrics characterize the simulated electronic/filter chain under artificial instantaneous glucose changes. Real electrochemical sensor dynamics are not yet modeled.

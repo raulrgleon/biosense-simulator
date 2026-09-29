@@ -67,7 +67,15 @@ const CONFIG = {
   dt: 0.1,
   historySeconds: 120,
   chartSeconds: 60,
-  version: "2.1.0"
+  transient: {
+    stepThresholdMgDl: 5,
+    settlingBandMgDl: 5,
+    settlingPercent: 2,
+    holdTimeS: 1,
+    trackingRateThreshold: 0.25,
+    lagMaxS: 5
+  },
+  version: "2.2.0"
 };
 
 /* ============================================================
@@ -955,6 +963,136 @@ function runSelfTests() {
     history.length + " samples from " + history[0].t
   );
 
+  check(
+    "Nominal 200 mg/dL path is unchanged",
+    Math.abs(nominal.glucose - 200) < 1e-12
+      && nominal.tia.ideal.toFixed(3) === "1.850"
+      && nominal.adc.count === 2296
+      && Math.abs(session120.samples[0].estimated_glucose_mgdl - 200.256) < 0.01,
+    session120.samples[0].estimated_glucose_mgdl
+  );
+  check(
+    "Full-session capture still has 1201 samples at 0.1 s",
+    session120.samples.length === 1201,
+    session120.samples.length
+  );
+  check(
+    "Stable 200 mg/dL session has zero step events",
+    session120.transientAnalysis.summary.step_count === 0
+      && session120.transientAnalysis.events.length === 0,
+    session120.transientAnalysis.summary.step_count
+  );
+
+  function synthPairs(from, to, directionLabel) {
+    const rows = [];
+    for (let i = 0; i <= 80; i += 1) {
+      const t = Math.round(i * 0.1 * 10) / 10;
+      const stepped = t >= 2;
+      const actual = stepped ? to : from;
+      const u = stepped ? Math.min(1, (t - 2) / 1.5) : 0;
+      const est = from + (to - from) * u;
+      rows.push({
+        time_s: t,
+        actual_glucose_mgdl: actual,
+        estimated_glucose_mgdl: est,
+        error_mgdl: est - actual
+      });
+    }
+    return { rows: rows, directionLabel: directionLabel };
+  }
+  const risingSynth = analyzeTransientResponse(synthPairs(80, 220, "rising").rows, { sampleIntervalS: 0.1 });
+  const fallingSynth = analyzeTransientResponse(synthPairs(220, 80, "falling").rows, { sampleIntervalS: 0.1 });
+  check("Synthetic single step detects exactly one event", risingSynth.summary.step_count === 1 && risingSynth.events.length === 1, risingSynth.summary.step_count);
+  check("Rising step direction is rising", risingSynth.events[0] && risingSynth.events[0].direction === "rising", risingSynth.events[0] && risingSynth.events[0].direction);
+  check("Falling step direction is falling", fallingSynth.events[0] && fallingSynth.events[0].direction === "falling", fallingSynth.events[0] && fallingSynth.events[0].direction);
+
+  const rapidSession = buildScenarioSession("rapid", 120, { now: new Date("2026-09-29T10:00:00"), id: "BS-RAPID" });
+  const rapidTimes = rapidSession.transientAnalysis.events.map((ev) => ev.start_time_s);
+  const expectedRapid = [];
+  for (let t = 10; t <= 120; t += 10) expectedRapid.push(t);
+  const rapidTimesOk = rapidTimes.length === expectedRapid.length && rapidTimes.every((t, i) => Math.abs(t - expectedRapid[i]) < 0.15);
+  check(
+    "Rapid scenario detects discrete steps at 10 s boundaries",
+    rapidTimesOk && rapidSession.transientAnalysis.summary.step_count === 12,
+    rapidTimes.join(",")
+  );
+
+  const risingSession = buildScenarioSession("rising", 120, { now: new Date("2026-09-29T10:00:00"), id: "BS-RISE" });
+  check(
+    "Smooth rising scenario does not produce a step storm",
+    risingSession.transientAnalysis.summary.step_count === 0,
+    risingSession.transientAnalysis.summary.step_count
+  );
+
+  function valuesFiniteOrNull(obj) {
+    if (obj == null) return true;
+    if (typeof obj === "number") return Number.isFinite(obj);
+    if (Array.isArray(obj)) return obj.every(valuesFiniteOrNull);
+    if (typeof obj === "object") return Object.keys(obj).every((key) => valuesFiniteOrNull(obj[key]));
+    return true;
+  }
+  const settleOk = rapidSession.transientAnalysis.events.every((ev) => (
+    (ev.settling_time_5mg_s == null || Number.isFinite(ev.settling_time_5mg_s))
+    && (ev.settling_time_2pct_s == null || Number.isFinite(ev.settling_time_2pct_s))
+    && ev.settling_time_5mg_s !== Infinity
+    && !Number.isNaN(ev.settling_time_5mg_s)
+  ));
+  const riseFallOk = rapidSession.transientAnalysis.events.every((ev) => (
+    (ev.rise_time_10_90_s == null || Number.isFinite(ev.rise_time_10_90_s))
+    && (ev.fall_time_90_10_s == null || Number.isFinite(ev.fall_time_90_10_s))
+  ));
+  check("Settling times are finite or null", settleOk && valuesFiniteOrNull(rapidSession.transientAnalysis), "");
+  check("Rise/fall times are finite or null", riseFallOk, "");
+
+  const rapidJson = sessionJsonString(rapidSession);
+  const parsedRapid = JSON.parse(rapidJson);
+  check(
+    "JSON with transient analysis contains no NaN or Infinity",
+    !jsonContainsNonFinite(rapidJson)
+      && parsedRapid.transientAnalysis
+      && parsedRapid.trackingAnalysis
+      && parsedRapid.transientAnalysis.summary.step_count === 12,
+    ""
+  );
+  const summaryText = buildSummaryCsv(session120);
+  check(
+    "Summary CSV contains new transient fields",
+    summaryText.indexOf("step_count") >= 0
+      && summaryText.indexOf("Transient") >= 0
+      && summaryText.indexOf("best_fit_lag") >= 0,
+    ""
+  );
+  const transLines = buildTransitionsCsv(rapidSession).split("\n");
+  check(
+    "Transitions CSV row count equals events plus header",
+    transLines.length === rapidSession.transientAnalysis.events.length + 1,
+    transLines.length
+  );
+  const zeroTrans = buildTransitionsCsv(session120).split("\n");
+  check(
+    "Zero-transition session still exports header-only transitions CSV",
+    zeroTrans.length === 1 && zeroTrans[0].indexOf("event_id") >= 0,
+    zeroTrans.length
+  );
+  const zeroHtml = buildHtmlReport(session120, {});
+  check(
+    "HTML report still works with zero transitions",
+    zeroHtml.indexOf("TRANSIENT RESPONSE") >= 0 && zeroHtml.indexOf("No discrete glucose steps detected") >= 0,
+    ""
+  );
+  const pdfAgain = buildSessionPdf(session120, []);
+  check(
+    "PDF generation still starts with a valid %PDF signature",
+    pdfAgain[0] === 0x25 && pdfAgain[1] === 0x50 && pdfAgain[2] === 0x44 && pdfAgain[3] === 0x46,
+    pdfAgain.length
+  );
+  const rapidPdf = buildSessionPdf(rapidSession, []);
+  check(
+    "Rapid-session PDF remains a valid standalone file",
+    rapidPdf[0] === 0x25 && rapidPdf[1] === 0x50 && rapidPdf[2] === 0x44 && rapidPdf[3] === 0x46,
+    rapidPdf.length
+  );
+
   return { pass: results.every((item) => item.pass), results, nominal };
 }
 
@@ -1100,7 +1238,9 @@ function createSimulationSession(params, options) {
     configuration: captureConfiguration(p),
     samples: [],
     metrics: null,
-    quality: { status: "GOOD", reasons: [] }
+    quality: { status: "GOOD", reasons: [] },
+    transientAnalysis: null,
+    trackingAnalysis: null
   };
 }
 
@@ -1263,6 +1403,413 @@ function calculateSessionMetrics(samples) {
   };
 }
 
+/* ============================================================
+   TRANSIENT / TRACKING ANALYSIS
+   Pure post-run metrics. Does not change sensor or electronics math.
+   ============================================================ */
+
+function analysisFinite(value) {
+  return Number.isFinite(value) ? value : null;
+}
+
+function analysisMean(values) {
+  const finite = [];
+  for (let i = 0; i < values.length; i += 1) {
+    if (Number.isFinite(values[i])) finite.push(values[i]);
+  }
+  if (!finite.length) return null;
+  let sum = 0;
+  for (let i = 0; i < finite.length; i += 1) sum += finite[i];
+  return sum / finite.length;
+}
+
+function analysisMax(values) {
+  const finite = [];
+  for (let i = 0; i < values.length; i += 1) {
+    if (Number.isFinite(values[i])) finite.push(values[i]);
+  }
+  if (!finite.length) return null;
+  return Math.max.apply(null, finite);
+}
+
+function inferAnalysisDt(samples, fallback) {
+  if (Number.isFinite(fallback) && fallback > 0) return fallback;
+  if (samples && samples.length >= 2) {
+    const dt = samples[1].time_s - samples[0].time_s;
+    if (Number.isFinite(dt) && dt > 0) return dt;
+  }
+  return CONFIG.dt;
+}
+
+function sampleSignedError(row) {
+  if (!row) return null;
+  if (Number.isFinite(row.error_mgdl)) return row.error_mgdl;
+  if (Number.isFinite(row.estimated_glucose_mgdl) && Number.isFinite(row.actual_glucose_mgdl)) {
+    return row.estimated_glucose_mgdl - row.actual_glucose_mgdl;
+  }
+  return null;
+}
+
+function interpolateLevelTime(t0, y0, t1, y1, level) {
+  if (!Number.isFinite(t0) || !Number.isFinite(t1) || !Number.isFinite(y0) || !Number.isFinite(y1) || !Number.isFinite(level)) {
+    return null;
+  }
+  if (y1 === y0) return Math.abs(y0 - level) <= 1e-12 ? t0 : null;
+  const u = (level - y0) / (y1 - y0);
+  if (u < -1e-12 || u > 1 + 1e-12) return null;
+  const t = t0 + Math.min(1, Math.max(0, u)) * (t1 - t0);
+  return Number.isFinite(t) ? t : null;
+}
+
+function firstLevelCrossing(window, level, afterTime, rising) {
+  if (!window || !window.length || !Number.isFinite(level)) return null;
+  const startT = Number.isFinite(afterTime) ? afterTime : -Infinity;
+  for (let i = 1; i < window.length; i += 1) {
+    const t0 = window[i - 1].time_s;
+    const t1 = window[i].time_s;
+    const y0 = window[i - 1].estimated_glucose_mgdl;
+    const y1 = window[i].estimated_glucose_mgdl;
+    if (!Number.isFinite(t0) || !Number.isFinite(t1) || !Number.isFinite(y0) || !Number.isFinite(y1)) continue;
+    if (t1 + 1e-12 < startT) continue;
+    const crossed = rising
+      ? ((y0 < level && y1 >= level) || (y0 <= level && y1 > level))
+      : ((y0 > level && y1 <= level) || (y0 >= level && y1 < level));
+    if (!crossed) continue;
+    const tc = interpolateLevelTime(t0, y0, t1, y1, level);
+    if (tc == null || tc + 1e-12 < startT) continue;
+    return tc;
+  }
+  for (let i = 0; i < window.length; i += 1) {
+    const t = window[i].time_s;
+    const y = window[i].estimated_glucose_mgdl;
+    if (!Number.isFinite(t) || t + 1e-12 < startT || !Number.isFinite(y)) continue;
+    if (rising ? y >= level : y <= level) return Math.max(t, startT);
+    break;
+  }
+  return null;
+}
+
+function measureHoldSettling(window, target, band, holdS, dt) {
+  if (!window || !window.length || !Number.isFinite(target) || !Number.isFinite(band) || !(holdS > 0) || !(dt > 0)) {
+    return { time: null, completeIndex: -1 };
+  }
+  const required = Math.max(1, Math.round(holdS / dt));
+  const t0 = window[0].time_s;
+  let runStart = -1;
+  for (let i = 0; i < window.length; i += 1) {
+    const est = window[i].estimated_glucose_mgdl;
+    const inBand = Number.isFinite(est) && Math.abs(est - target) <= band + 1e-12;
+    if (inBand) {
+      if (runStart < 0) runStart = i;
+      if (i - runStart + 1 >= required) {
+        const settle = Number.isFinite(window[i].time_s) && Number.isFinite(t0) ? window[i].time_s - t0 : null;
+        return { time: analysisFinite(settle), completeIndex: i };
+      }
+    } else {
+      runStart = -1;
+    }
+  }
+  return { time: null, completeIndex: -1 };
+}
+
+function emptyTransientSummary() {
+  return {
+    step_count: 0,
+    settled_5mg_count: 0,
+    unsettled_5mg_count: 0,
+    mean_settling_time_5mg_s: null,
+    max_settling_time_5mg_s: null,
+    mean_settling_time_2pct_s: null,
+    max_settling_time_2pct_s: null,
+    mean_rise_time_10_90_s: null,
+    mean_fall_time_90_10_s: null,
+    max_peak_abs_error_mgdl: null,
+    mean_event_transient_mae_mgdl: null,
+    mean_event_transient_rmse_mgdl: null,
+    max_overshoot_mgdl: null,
+    max_undershoot_mgdl: null,
+    mean_steady_state_mae_mgdl: null
+  };
+}
+
+function theoreticalRcTimes(rcS) {
+  if (!Number.isFinite(rcS) || rcS < 0) {
+    return { tau_s: null, t63_2_s: null, t90_s: null, t95_s: null, t98_s: null };
+  }
+  return {
+    tau_s: rcS,
+    t63_2_s: rcS,
+    t90_s: 2.303 * rcS,
+    t95_s: 2.996 * rcS,
+    t98_s: 3.912 * rcS
+  };
+}
+
+function transientFilterInfo(options, dt) {
+  const tia = (options && options.glucoseTia) || {};
+  let rc = Number.isFinite(tia.rc_s) ? tia.rc_s : null;
+  if (rc == null && Number.isFinite(tia.rf_ohm) && Number.isFinite(tia.cf_f)) rc = tia.rf_ohm * tia.cf_f;
+  const cutoff = Number.isFinite(tia.rf_ohm) && Number.isFinite(tia.cf_f)
+    ? calculateCutoffFrequency(tia.rf_ohm, tia.cf_f)
+    : { fc: Number.isFinite(tia.fc_hz) ? tia.fc_hz : (rc > 0 ? 1 / (2 * Math.PI * rc) : NaN), rc: rc };
+  const alpha = Number.isFinite(tia.rf_ohm) && Number.isFinite(tia.cf_f)
+    ? filterAlpha(tia.rf_ohm, tia.cf_f, dt)
+    : (Number.isFinite(rc) ? filterAlpha(1, rc, dt) : NaN);
+  return {
+    rc_s: analysisFinite(Number.isFinite(cutoff.rc) ? cutoff.rc : rc),
+    fc_hz: analysisFinite(cutoff.fc),
+    dt_s: analysisFinite(dt),
+    alpha: analysisFinite(alpha),
+    theoretical: theoreticalRcTimes(Number.isFinite(cutoff.rc) ? cutoff.rc : rc)
+  };
+}
+
+function analyzeTransientResponse(samples, options) {
+  const opts = options || {};
+  const cfgT = CONFIG.transient;
+  const stepThreshold = Number.isFinite(opts.stepThresholdMgDl) ? opts.stepThresholdMgDl : cfgT.stepThresholdMgDl;
+  const band5 = Number.isFinite(opts.settlingBandMgDl) ? opts.settlingBandMgDl : cfgT.settlingBandMgDl;
+  const pct = Number.isFinite(opts.settlingPercent) ? opts.settlingPercent : cfgT.settlingPercent;
+  const holdS = Number.isFinite(opts.holdTimeS) ? opts.holdTimeS : cfgT.holdTimeS;
+  const list = Array.isArray(samples) ? samples : [];
+  const dt = inferAnalysisDt(list, opts.sampleIntervalS);
+  const configuration = {
+    step_threshold_mgdl: stepThreshold,
+    settling_band_mgdl: band5,
+    settling_percent: pct,
+    hold_time_s: holdS
+  };
+  const filter = transientFilterInfo(opts, dt);
+  const starts = [];
+  for (let i = 1; i < list.length; i += 1) {
+    const prev = list[i - 1].actual_glucose_mgdl;
+    const curr = list[i].actual_glucose_mgdl;
+    if (!Number.isFinite(prev) || !Number.isFinite(curr)) continue;
+    if (Math.abs(curr - prev) >= stepThreshold) starts.push(i);
+  }
+
+  const events = [];
+  for (let e = 0; e < starts.length; e += 1) {
+    const startIdx = starts[e];
+    const endIdx = e + 1 < starts.length ? starts[e + 1] - 1 : list.length - 1;
+    const window = list.slice(startIdx, endIdx + 1);
+    const crossingWindow = list.slice(startIdx - 1, endIdx + 1);
+    const from = list[startIdx - 1].actual_glucose_mgdl;
+    const to = list[startIdx].actual_glucose_mgdl;
+    const delta = to - from;
+    const direction = delta >= 0 ? "rising" : "falling";
+    const startTime = list[startIdx].time_s;
+
+    let peakAbs = null;
+    let peakSigned = null;
+    let peakTime = null;
+    let absSum = 0;
+    let sqSum = 0;
+    let nErr = 0;
+    let maxEst = -Infinity;
+    let minEst = Infinity;
+    for (let i = 0; i < window.length; i += 1) {
+      const est = window[i].estimated_glucose_mgdl;
+      if (Number.isFinite(est)) {
+        if (est > maxEst) maxEst = est;
+        if (est < minEst) minEst = est;
+      }
+      const signed = sampleSignedError(window[i]);
+      if (!Number.isFinite(signed)) continue;
+      const ae = Math.abs(signed);
+      nErr += 1;
+      absSum += ae;
+      sqSum += signed * signed;
+      if (peakAbs == null || ae > peakAbs) {
+        peakAbs = ae;
+        peakSigned = signed;
+        peakTime = window[i].time_s;
+      }
+    }
+
+    const settle5 = measureHoldSettling(window, to, band5, holdS, dt);
+    const bandPct = Math.max(Math.abs(to) * (pct / 100), 1);
+    const settlePct = measureHoldSettling(window, to, bandPct, holdS, dt);
+
+    const level10 = from + 0.10 * delta;
+    const level90 = from + 0.90 * delta;
+    let rise = null;
+    let fall = null;
+    if (direction === "rising") {
+      const t10 = firstLevelCrossing(crossingWindow, level10, null, true);
+      const t90 = t10 == null ? null : firstLevelCrossing(crossingWindow, level90, t10, true);
+      rise = t10 != null && t90 != null ? analysisFinite(t90 - t10) : null;
+    } else {
+      const t10 = firstLevelCrossing(crossingWindow, level10, null, false);
+      const t90 = t10 == null ? null : firstLevelCrossing(crossingWindow, level90, t10, false);
+      fall = t10 != null && t90 != null ? analysisFinite(t90 - t10) : null;
+    }
+
+    const overshoot = direction === "rising" && Number.isFinite(maxEst) ? Math.max(0, maxEst - to) : 0;
+    const undershoot = direction === "falling" && Number.isFinite(minEst) ? Math.max(0, to - minEst) : 0;
+
+    let ssMean = null;
+    let ssMae = null;
+    if (settle5.completeIndex >= 0) {
+      let sSum = 0;
+      let sAbs = 0;
+      let sN = 0;
+      for (let i = settle5.completeIndex; i < window.length; i += 1) {
+        const signed = sampleSignedError(window[i]);
+        if (!Number.isFinite(signed)) continue;
+        sN += 1;
+        sSum += signed;
+        sAbs += Math.abs(signed);
+      }
+      if (sN) {
+        ssMean = sSum / sN;
+        ssMae = sAbs / sN;
+      }
+    }
+
+    events.push({
+      id: e + 1,
+      start_time_s: analysisFinite(startTime),
+      from_mgdl: analysisFinite(from),
+      to_mgdl: analysisFinite(to),
+      delta_mgdl: analysisFinite(delta),
+      direction: direction,
+      settling_time_5mg_s: settle5.time,
+      settling_time_2pct_s: settlePct.time,
+      rise_time_10_90_s: rise,
+      fall_time_90_10_s: fall,
+      peak_abs_error_mgdl: analysisFinite(peakAbs),
+      peak_error_signed_mgdl: analysisFinite(peakSigned),
+      peak_error_time_s: analysisFinite(peakTime),
+      transient_mae_mgdl: nErr ? absSum / nErr : null,
+      transient_rmse_mgdl: nErr ? Math.sqrt(sqSum / nErr) : null,
+      overshoot_mgdl: analysisFinite(overshoot) == null ? 0 : overshoot,
+      undershoot_mgdl: analysisFinite(undershoot) == null ? 0 : undershoot,
+      steady_state_mean_error_mgdl: analysisFinite(ssMean),
+      steady_state_mae_mgdl: analysisFinite(ssMae),
+      status: settle5.time != null ? "SETTLED" : "NOT_SETTLED_BEFORE_NEXT_STEP"
+    });
+  }
+
+  const summary = emptyTransientSummary();
+  summary.step_count = events.length;
+  summary.settled_5mg_count = events.filter((ev) => ev.settling_time_5mg_s != null).length;
+  summary.unsettled_5mg_count = events.length - summary.settled_5mg_count;
+  if (events.length) {
+    summary.mean_settling_time_5mg_s = analysisMean(events.map((ev) => ev.settling_time_5mg_s));
+    summary.max_settling_time_5mg_s = analysisMax(events.map((ev) => ev.settling_time_5mg_s));
+    summary.mean_settling_time_2pct_s = analysisMean(events.map((ev) => ev.settling_time_2pct_s));
+    summary.max_settling_time_2pct_s = analysisMax(events.map((ev) => ev.settling_time_2pct_s));
+    summary.mean_rise_time_10_90_s = analysisMean(events.map((ev) => ev.rise_time_10_90_s));
+    summary.mean_fall_time_90_10_s = analysisMean(events.map((ev) => ev.fall_time_90_10_s));
+    summary.max_peak_abs_error_mgdl = analysisMax(events.map((ev) => ev.peak_abs_error_mgdl));
+    summary.mean_event_transient_mae_mgdl = analysisMean(events.map((ev) => ev.transient_mae_mgdl));
+    summary.mean_event_transient_rmse_mgdl = analysisMean(events.map((ev) => ev.transient_rmse_mgdl));
+    summary.max_overshoot_mgdl = analysisMax(events.map((ev) => ev.overshoot_mgdl));
+    summary.max_undershoot_mgdl = analysisMax(events.map((ev) => ev.undershoot_mgdl));
+    summary.mean_steady_state_mae_mgdl = analysisMean(events.map((ev) => ev.steady_state_mae_mgdl));
+  }
+
+  return {
+    version: 1,
+    configuration: configuration,
+    summary: summary,
+    events: events,
+    filter: filter,
+    interpretation: "Step-response metrics characterize the simulated electronic/filter chain under artificial instantaneous glucose changes. Real electrochemical sensor dynamics are not yet modeled."
+  };
+}
+
+function analyzeContinuousTracking(samples, options) {
+  const opts = options || {};
+  const cfgT = CONFIG.transient;
+  const rateTh = Number.isFinite(opts.trackingRateThreshold) ? opts.trackingRateThreshold : cfgT.trackingRateThreshold;
+  const lagMax = Number.isFinite(opts.lagMaxS) ? opts.lagMaxS : cfgT.lagMaxS;
+  const list = Array.isArray(samples) ? samples : [];
+  const dt = inferAnalysisDt(list, opts.sampleIntervalS);
+
+  let moving = 0;
+  let sum = 0;
+  let absSum = 0;
+  let sq = 0;
+  let n = 0;
+  let maxAbs = null;
+  let maxT = null;
+  for (let i = 1; i < list.length; i += 1) {
+    const t0 = list[i - 1].time_s;
+    const t1 = list[i].time_s;
+    const a0 = list[i - 1].actual_glucose_mgdl;
+    const a1 = list[i].actual_glucose_mgdl;
+    const span = t1 - t0;
+    if (!(span > 0) || !Number.isFinite(a0) || !Number.isFinite(a1)) continue;
+    if (Math.abs((a1 - a0) / span) <= rateTh) continue;
+    moving += 1;
+    const signed = sampleSignedError(list[i]);
+    if (!Number.isFinite(signed)) continue;
+    n += 1;
+    sum += signed;
+    absSum += Math.abs(signed);
+    sq += signed * signed;
+    if (maxAbs == null || Math.abs(signed) > maxAbs) {
+      maxAbs = Math.abs(signed);
+      maxT = list[i].time_s;
+    }
+  }
+
+  let bestLag = null;
+  let bestRmse = null;
+  if (moving > 0 && list.length >= 2 && dt > 0) {
+    const maxSteps = Math.floor(lagMax / dt + 1e-9);
+    for (let k = 0; k <= maxSteps; k += 1) {
+      let ssq = 0;
+      let cn = 0;
+      for (let i = k; i < list.length; i += 1) {
+        const est = list[i].estimated_glucose_mgdl;
+        const act = list[i - k].actual_glucose_mgdl;
+        if (!Number.isFinite(est) || !Number.isFinite(act)) continue;
+        const err = est - act;
+        ssq += err * err;
+        cn += 1;
+      }
+      if (!cn) continue;
+      const rmse = Math.sqrt(ssq / cn);
+      if (bestRmse == null || rmse < bestRmse - 1e-15) {
+        bestRmse = rmse;
+        bestLag = k * dt;
+      }
+    }
+  }
+
+  return {
+    moving_sample_count: moving,
+    mean_signed_error_mgdl: n ? sum / n : null,
+    mae_mgdl: n ? absSum / n : null,
+    rmse_mgdl: n ? Math.sqrt(sq / n) : null,
+    max_abs_error_mgdl: analysisFinite(maxAbs),
+    max_abs_error_time_s: analysisFinite(maxT),
+    best_fit_lag_s: analysisFinite(bestLag),
+    lag_corrected_rmse_mgdl: analysisFinite(bestRmse),
+    configuration: {
+      rate_threshold_mgdl_per_s: rateTh,
+      lag_max_s: lagMax
+    }
+  };
+}
+
+function attachSessionDynamicAnalysis(session) {
+  if (!session) return session;
+  const samples = session.samples || [];
+  const tia = session.configuration && session.configuration.glucose_tia;
+  session.transientAnalysis = analyzeTransientResponse(samples, {
+    sampleIntervalS: session.sampleIntervalS,
+    glucoseTia: tia
+  });
+  session.trackingAnalysis = analyzeContinuousTracking(samples, {
+    sampleIntervalS: session.sampleIntervalS
+  });
+  return session;
+}
+
 function sessionQualityFromMetrics(session) {
   const reasons = [];
   const samples = session.samples;
@@ -1301,6 +1848,7 @@ function finalizeSimulationSession(session, status) {
   session.duration_s = samples.length ? samples[samples.length - 1].time_s - samples[0].time_s : 0;
   session.metrics = calculateSessionMetrics(samples);
   session.quality = sessionQualityFromMetrics(session);
+  attachSessionDynamicAnalysis(session);
   return session;
 }
 
@@ -1418,6 +1966,53 @@ function summaryRows(session) {
     ["Temperature", "max", m.temperature.max_c, "C"],
     ["Influence", "enabled", cfg.oxygen_glucose_influence.enabled, ""],
     ["Influence", "coefficient", cfg.oxygen_glucose_influence.coefficient, "%/sim"]
+  ].concat(transientSummaryRows(session));
+}
+
+function transientSummaryRows(session) {
+  const tr = session.transientAnalysis || analyzeTransientResponse(session.samples || [], {
+    sampleIntervalS: session.sampleIntervalS,
+    glucoseTia: session.configuration && session.configuration.glucose_tia
+  });
+  const tk = session.trackingAnalysis || analyzeContinuousTracking(session.samples || [], {
+    sampleIntervalS: session.sampleIntervalS
+  });
+  const s = tr.summary || emptyTransientSummary();
+  const f = tr.filter || transientFilterInfo({ glucoseTia: session.configuration && session.configuration.glucose_tia }, session.sampleIntervalS);
+  const theo = f.theoretical || theoreticalRcTimes(null);
+  return [
+    ["Transient", "step_count", s.step_count, ""],
+    ["Transient", "settled_5mg_count", s.settled_5mg_count, ""],
+    ["Transient", "unsettled_5mg_count", s.unsettled_5mg_count, ""],
+    ["Transient", "mean_settling_time_5mg", s.mean_settling_time_5mg_s, "s"],
+    ["Transient", "max_settling_time_5mg", s.max_settling_time_5mg_s, "s"],
+    ["Transient", "mean_settling_time_2pct", s.mean_settling_time_2pct_s, "s"],
+    ["Transient", "max_settling_time_2pct", s.max_settling_time_2pct_s, "s"],
+    ["Transient", "mean_rise_time_10_90", s.mean_rise_time_10_90_s, "s"],
+    ["Transient", "mean_fall_time_90_10", s.mean_fall_time_90_10_s, "s"],
+    ["Transient", "max_peak_abs_error", s.max_peak_abs_error_mgdl, "mg/dL"],
+    ["Transient", "mean_event_transient_mae", s.mean_event_transient_mae_mgdl, "mg/dL"],
+    ["Transient", "mean_event_transient_rmse", s.mean_event_transient_rmse_mgdl, "mg/dL"],
+    ["Transient", "max_overshoot", s.max_overshoot_mgdl, "mg/dL"],
+    ["Transient", "max_undershoot", s.max_undershoot_mgdl, "mg/dL"],
+    ["Transient", "mean_steady_state_mae", s.mean_steady_state_mae_mgdl, "mg/dL"],
+    ["Transient", "glucose_filter_rc", f.rc_s, "s"],
+    ["Transient", "glucose_filter_fc", f.fc_hz, "Hz"],
+    ["Transient", "simulation_dt", f.dt_s, "s"],
+    ["Transient", "filter_alpha", f.alpha, ""],
+    ["Transient", "theoretical_tau", theo.tau_s, "s"],
+    ["Transient", "theoretical_t63_2", theo.t63_2_s, "s"],
+    ["Transient", "theoretical_t90", theo.t90_s, "s"],
+    ["Transient", "theoretical_t95", theo.t95_s, "s"],
+    ["Transient", "theoretical_t98", theo.t98_s, "s"],
+    ["Tracking", "moving_sample_count", tk.moving_sample_count, ""],
+    ["Tracking", "mean_signed_error", tk.mean_signed_error_mgdl, "mg/dL"],
+    ["Tracking", "mae", tk.mae_mgdl, "mg/dL"],
+    ["Tracking", "rmse", tk.rmse_mgdl, "mg/dL"],
+    ["Tracking", "max_abs_error", tk.max_abs_error_mgdl, "mg/dL"],
+    ["Tracking", "max_abs_error_time", tk.max_abs_error_time_s, "s"],
+    ["Tracking", "best_fit_lag", tk.best_fit_lag_s, "s"],
+    ["Tracking", "lag_corrected_rmse", tk.lag_corrected_rmse_mgdl, "mg/dL"]
   ];
 }
 
@@ -1445,6 +2040,8 @@ function buildSessionJson(session) {
     configuration: session.configuration,
     metrics: session.metrics,
     signal_quality: session.quality,
+    transientAnalysis: session.transientAnalysis,
+    trackingAnalysis: session.trackingAnalysis,
     samples: session.samples
   });
 }
@@ -1470,7 +2067,7 @@ function downsamplePoints(samples, xKey, yKey, maxPoints) {
   return points;
 }
 
-function svgSeriesChart(title, series, width, height) {
+function svgSeriesChart(title, series, width, height, markers) {
   const w = width || 640;
   const h = height || 220;
   const padL = 48;
@@ -1506,6 +2103,13 @@ function svgSeriesChart(title, series, width, height) {
     const d = item.points.map((p, i) => (i ? "L" : "M") + xPos(p.x).toFixed(1) + " " + yPos(p.y).toFixed(1)).join(" ");
     return '<path d="' + d + '" fill="none" stroke="' + item.color + '" stroke-width="1.6"/>';
   }).join("");
+  const marks = (markers || []).map((mark) => {
+    const x = Number.isFinite(mark.x) ? mark.x : mark.start_time_s;
+    if (!Number.isFinite(x) || x < xMin || x > xMax) return "";
+    const px = xPos(x).toFixed(1);
+    return '<line x1="' + px + '" y1="' + padT + '" x2="' + px + '" y2="' + (h - padB)
+      + '" stroke="rgba(226,177,90,0.35)" stroke-width="1" stroke-dasharray="3 3"/>';
+  }).join("");
   const legend = series.map((item, i) => (
     '<text x="' + (padL + i * 160) + '" y="18" fill="' + item.color + '" font-size="11">' + escapeHtml(item.label) + "</text>"
   )).join("");
@@ -1515,6 +2119,7 @@ function svgSeriesChart(title, series, width, height) {
     + legend
     + '<text x="8" y="' + (padT + 8) + '" fill="#8ea0b4" font-size="10">' + yMax.toFixed(2) + "</text>"
     + '<text x="8" y="' + (h - 8) + '" fill="#8ea0b4" font-size="10">' + yMin.toFixed(2) + "</text>"
+    + marks
     + paths
     + "</svg>";
 }
@@ -1555,15 +2160,78 @@ function captureLiveChartImages() {
   return images;
 }
 
+function htmlTransientReport(session) {
+  const tr = session.transientAnalysis || { summary: emptyTransientSummary(), events: [], filter: {}, interpretation: "" };
+  const tk = session.trackingAnalysis || {};
+  const s = tr.summary || emptyTransientSummary();
+  const f = tr.filter || {};
+  const theo = f.theoretical || theoreticalRcTimes(null);
+  const events = tr.events || [];
+  let eventBlock = "<p>No discrete glucose steps detected in this session.</p>";
+  if (events.length) {
+    eventBlock = "<table><thead><tr><th>#</th><th>Time</th><th>Direction</th><th>From</th><th>To</th><th>Δ</th>"
+      + "<th>Settle ±5</th><th>Settle ±2%</th><th>Rise/Fall</th><th>Peak error</th><th>OS/US</th><th>Status</th></tr></thead><tbody>"
+      + events.map((ev) => (
+        "<tr><td>" + escapeHtml(ev.id)
+        + "</td><td>" + escapeHtml(formatMetric(ev.start_time_s, 1))
+        + "</td><td>" + escapeHtml(ev.direction)
+        + "</td><td>" + escapeHtml(formatMetric(ev.from_mgdl, 1))
+        + "</td><td>" + escapeHtml(formatMetric(ev.to_mgdl, 1))
+        + "</td><td>" + escapeHtml(formatMetric(ev.delta_mgdl, 1))
+        + "</td><td>" + escapeHtml(formatMetric(ev.settling_time_5mg_s, 3))
+        + "</td><td>" + escapeHtml(formatMetric(ev.settling_time_2pct_s, 3))
+        + "</td><td>" + escapeHtml(ev.direction === "rising" ? formatMetric(ev.rise_time_10_90_s, 3) : formatMetric(ev.fall_time_90_10_s, 3))
+        + "</td><td>" + escapeHtml(formatMetric(ev.peak_abs_error_mgdl, 2))
+        + "</td><td>" + escapeHtml(formatMetric(ev.direction === "rising" ? ev.overshoot_mgdl : ev.undershoot_mgdl, 2))
+        + "</td><td>" + escapeHtml(ev.status)
+        + "</td></tr>"
+      )).join("")
+      + "</tbody></table>";
+  }
+  return "<h2>TRANSIENT RESPONSE</h2>"
+    + "<p>" + escapeHtml(tr.interpretation || "Step-response metrics characterize the simulated electronic/filter chain under artificial instantaneous glucose changes. Real electrochemical sensor dynamics are not yet modeled.") + "</p>"
+    + "<p>Step events " + s.step_count
+    + " · Settled " + s.settled_5mg_count
+    + " · Mean settle ±5 " + escapeHtml(formatMetric(s.mean_settling_time_5mg_s, 3))
+    + " s · Worst settle ±5 " + escapeHtml(formatMetric(s.max_settling_time_5mg_s, 3))
+    + " s · Mean 10–90% " + escapeHtml(formatMetric(s.mean_rise_time_10_90_s, 3))
+    + " s · Mean 90–10% " + escapeHtml(formatMetric(s.mean_fall_time_90_10_s, 3))
+    + " s · Max transient error " + escapeHtml(formatMetric(s.max_peak_abs_error_mgdl, 2))
+    + " mg/dL · Mean event MAE " + escapeHtml(formatMetric(s.mean_event_transient_mae_mgdl, 2))
+    + " · Steady-state MAE " + escapeHtml(formatMetric(s.mean_steady_state_mae_mgdl, 3))
+    + " · Max overshoot " + escapeHtml(formatMetric(s.max_overshoot_mgdl, 2))
+    + " · Max undershoot " + escapeHtml(formatMetric(s.max_undershoot_mgdl, 2)) + "</p>"
+    + "<p>Glucose filter RC " + escapeHtml(formatMetric(f.rc_s, 4))
+    + " s · fc " + escapeHtml(formatMetric(f.fc_hz, 4))
+    + " Hz · dt " + escapeHtml(formatMetric(f.dt_s, 3))
+    + " s · alpha " + escapeHtml(formatMetric(f.alpha, 4)) + "</p>"
+    + "<h3>THEORETICAL RC RESPONSE</h3>"
+    + "<p>tau " + escapeHtml(formatMetric(theo.tau_s, 4))
+    + " s · t63.2 " + escapeHtml(formatMetric(theo.t63_2_s, 4))
+    + " s · t90 " + escapeHtml(formatMetric(theo.t90_s, 4))
+    + " s · t95 " + escapeHtml(formatMetric(theo.t95_s, 4))
+    + " s · t98 " + escapeHtml(formatMetric(theo.t98_s, 4))
+    + " s. Theoretical first-order RC values, not a measured sensor response.</p>"
+    + "<h3>STEP EVENTS</h3>" + eventBlock
+    + "<h3>CONTINUOUS TRACKING</h3>"
+    + "<p>Moving samples " + escapeHtml(String(tk.moving_sample_count == null ? 0 : tk.moving_sample_count))
+    + " · Tracking MAE " + escapeHtml(formatMetric(tk.mae_mgdl, 3))
+    + " · Tracking RMSE " + escapeHtml(formatMetric(tk.rmse_mgdl, 3))
+    + " · Max tracking error " + escapeHtml(formatMetric(tk.max_abs_error_mgdl, 3))
+    + " · Best-fit lag " + escapeHtml(formatMetric(tk.best_fit_lag_s, 3))
+    + " s · Lag-corrected RMSE " + escapeHtml(formatMetric(tk.lag_corrected_rmse_mgdl, 3)) + "</p>";
+}
+
 function buildHtmlReport(session, chartImages) {
   const cfg = session.configuration;
   const m = session.metrics;
   const q = session.quality;
   const images = chartImages || {};
+  const stepEvents = (session.transientAnalysis && session.transientAnalysis.events) || [];
   const glucoseSvg = svgSeriesChart("Glucose estimation", [
     { label: "Actual", color: "#3cbfb4", points: downsamplePoints(session.samples, "time_s", "actual_glucose_mgdl", 800) },
     { label: "Estimated", color: "#e2b15a", points: downsamplePoints(session.samples, "time_s", "estimated_glucose_mgdl", 800) }
-  ]);
+  ], 640, 220, stepEvents);
   const oxygenSvg = svgSeriesChart("Oxygen (sim · PROVISIONAL)", [
     { label: "Level", color: "#7dcea0", points: downsamplePoints(session.samples, "time_s", "oxygen_level_sim", 800) },
     { label: "Recovered", color: "#e2b15a", points: downsamplePoints(session.samples, "time_s", "oxygen_recovered_level_sim", 800) }
@@ -1628,6 +2296,7 @@ function buildHtmlReport(session, chartImages) {
     + "<h2>Temperature results</h2><p>Mean " + escapeHtml(formatMetric(m.temperature.mean_c, 3))
     + " °C · min " + escapeHtml(formatMetric(m.temperature.min_c, 3))
     + " · max " + escapeHtml(formatMetric(m.temperature.max_c, 3)) + "</p>"
+    + htmlTransientReport(session)
     + "<h2>Metrics</h2><table><thead><tr><th>Section</th><th>Parameter</th><th>Value</th><th>Unit</th></tr></thead><tbody>"
     + rows + "</tbody></table>"
     + "<h2>Full-run charts</h2>" + glucoseSvg + oxygenSvg + tempSvg + voutSvg
@@ -1710,7 +2379,7 @@ function jpegFromCanvas(canvas) {
   }
 }
 
-function renderSeriesCanvas(title, series, width, height) {
+function renderSeriesCanvas(title, series, width, height, markers) {
   if (typeof document === "undefined" || typeof document.createElement !== "function") return null;
   const canvas = document.createElement("canvas");
   canvas.width = width;
@@ -1760,6 +2429,19 @@ function renderSeriesCanvas(title, series, width, height) {
   ctx.font = "11px sans-serif";
   ctx.fillText(String(yMax.toFixed(2)), 8, padT + 8);
   ctx.fillText(String(yMin.toFixed(2)), 8, height - 10);
+  (markers || []).forEach((mark) => {
+    const x = Number.isFinite(mark.x) ? mark.x : mark.start_time_s;
+    if (!Number.isFinite(x) || x < xMin || x > xMax) return;
+    ctx.save();
+    ctx.strokeStyle = "rgba(226,177,90,0.4)";
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath();
+    ctx.moveTo(xPos(x), padT);
+    ctx.lineTo(xPos(x), height - padB);
+    ctx.stroke();
+    ctx.restore();
+  });
   series.forEach((item, index) => {
     const points = item.points || [];
     if (!points.length) return;
@@ -1782,11 +2464,12 @@ function renderSeriesCanvas(title, series, width, height) {
 function collectSessionPdfImages(session) {
   const images = [];
   if (typeof document === "undefined") return images;
+  const stepEvents = (session.transientAnalysis && session.transientAnalysis.events) || [];
   const charts = [
     ["Glucose estimation", [
       { label: "Actual", color: "#3cbfb4", points: downsamplePoints(session.samples, "time_s", "actual_glucose_mgdl", 800) },
       { label: "Estimated", color: "#e2b15a", points: downsamplePoints(session.samples, "time_s", "estimated_glucose_mgdl", 800) }
-    ]],
+    ], stepEvents],
     ["Oxygen (sim, PROVISIONAL)", [
       { label: "Level", color: "#7dcea0", points: downsamplePoints(session.samples, "time_s", "oxygen_level_sim", 800) },
       { label: "Recovered", color: "#e2b15a", points: downsamplePoints(session.samples, "time_s", "oxygen_recovered_level_sim", 800) }
@@ -1800,7 +2483,7 @@ function collectSessionPdfImages(session) {
     ]]
   ];
   charts.forEach((item) => {
-    const canvas = renderSeriesCanvas(item[0], item[1], 900, 300);
+    const canvas = renderSeriesCanvas(item[0], item[1], 900, 300, item[2]);
     const jpeg = jpegFromCanvas(canvas);
     if (jpeg) images.push(Object.assign({ title: item[0] }, jpeg));
   });
@@ -1910,6 +2593,49 @@ function buildSessionPdf(session, extraImages) {
   addText("TEMPERATURE RESULTS", 12, "0.24 0.75 0.71");
   addText("Mean " + formatMetric(m.temperature.mean_c, 3) + " C, min " + formatMetric(m.temperature.min_c, 3) + " C, max " + formatMetric(m.temperature.max_c, 3) + " C");
   addGap(8);
+  const tr = session.transientAnalysis || { summary: emptyTransientSummary(), events: [], filter: {}, interpretation: "" };
+  const tk = session.trackingAnalysis || {};
+  const ts = tr.summary || emptyTransientSummary();
+  const tf = tr.filter || {};
+  const theo = tf.theoretical || theoreticalRcTimes(null);
+  addText("TRANSIENT RESPONSE", 12, "0.24 0.75 0.71");
+  addText(tr.interpretation || "Step-response metrics characterize the simulated electronic/filter chain under artificial instantaneous glucose changes. Real electrochemical sensor dynamics are not yet modeled.", 9);
+  addText("Step events " + ts.step_count + ", settled " + ts.settled_5mg_count + ", unsettled " + ts.unsettled_5mg_count);
+  addText("Mean settle +/-5 " + formatMetric(ts.mean_settling_time_5mg_s, 3) + " s, worst " + formatMetric(ts.max_settling_time_5mg_s, 3) + " s");
+  addText("Mean 10-90 rise " + formatMetric(ts.mean_rise_time_10_90_s, 3) + " s, mean 90-10 fall " + formatMetric(ts.mean_fall_time_90_10_s, 3) + " s");
+  addText("Max transient error " + formatMetric(ts.max_peak_abs_error_mgdl, 2) + " mg/dL, mean event MAE " + formatMetric(ts.mean_event_transient_mae_mgdl, 2) + " mg/dL");
+  addText("Steady-state MAE " + formatMetric(ts.mean_steady_state_mae_mgdl, 3) + " mg/dL, max overshoot " + formatMetric(ts.max_overshoot_mgdl, 2) + ", max undershoot " + formatMetric(ts.max_undershoot_mgdl, 2));
+  addText("Glucose filter RC " + formatMetric(tf.rc_s, 4) + " s, fc " + formatMetric(tf.fc_hz, 4) + " Hz, dt " + formatMetric(tf.dt_s, 3) + " s, alpha " + formatMetric(tf.alpha, 4));
+  addText("THEORETICAL RC RESPONSE  tau " + formatMetric(theo.tau_s, 4) + " s, t63.2 " + formatMetric(theo.t63_2_s, 4) + " s, t90 " + formatMetric(theo.t90_s, 4) + " s, t95 " + formatMetric(theo.t95_s, 4) + " s, t98 " + formatMetric(theo.t98_s, 4) + " s", 9);
+  addText("These are theoretical first-order RC values, not a measured electrochemical sensor response.", 8, "0.56 0.63 0.71");
+  addGap(4);
+  addText("STEP EVENTS", 11, "0.24 0.75 0.71");
+  if (!tr.events || !tr.events.length) {
+    addText("No discrete glucose steps detected in this session.");
+  } else {
+    const shown = tr.events.slice(0, 16);
+    shown.forEach((ev) => {
+      const rf = ev.direction === "rising" ? formatMetric(ev.rise_time_10_90_s, 3) : formatMetric(ev.fall_time_90_10_s, 3);
+      addText(
+        "#" + ev.id + "  t=" + formatMetric(ev.start_time_s, 1) + "s  " + ev.direction
+        + "  " + formatMetric(ev.from_mgdl, 1) + "->" + formatMetric(ev.to_mgdl, 1)
+        + "  settle5=" + formatMetric(ev.settling_time_5mg_s, 3)
+        + "  rf=" + rf
+        + "  peak=" + formatMetric(ev.peak_abs_error_mgdl, 2)
+        + "  " + ev.status,
+        8
+      );
+    });
+    if (tr.events.length > shown.length) addText("(" + (tr.events.length - shown.length) + " more events in CSV/JSON)", 8);
+  }
+  addGap(4);
+  addText("CONTINUOUS TRACKING", 11, "0.24 0.75 0.71");
+  addText("Moving samples " + (tk.moving_sample_count == null ? 0 : tk.moving_sample_count)
+    + ", MAE " + formatMetric(tk.mae_mgdl, 3)
+    + " mg/dL, RMSE " + formatMetric(tk.rmse_mgdl, 3)
+    + " mg/dL, max " + formatMetric(tk.max_abs_error_mgdl, 3)
+    + " mg/dL, best-fit lag " + formatMetric(tk.best_fit_lag_s, 3) + " s");
+  addGap(8);
   addText("CHARTS  full run", 12, "0.24 0.75 0.71");
   (extraImages || []).forEach((image) => {
     if (image.title) addText(image.title, 9, "0.56 0.63 0.71");
@@ -1986,8 +2712,65 @@ function sessionFilenames(session) {
     summary: base + "_summary.csv",
     json: base + ".json",
     report: base + "_report.html",
-    pdf: base + ".pdf"
+    pdf: base + ".pdf",
+    transitions: base + "_transitions.csv"
   };
+}
+
+const TRANSITION_CSV_HEADERS = [
+  "simulation_id",
+  "event_id",
+  "start_time_s",
+  "direction",
+  "from_mgdl",
+  "to_mgdl",
+  "delta_mgdl",
+  "settling_time_5mg_s",
+  "settling_time_2pct_s",
+  "rise_time_10_90_s",
+  "fall_time_90_10_s",
+  "peak_abs_error_mgdl",
+  "peak_error_signed_mgdl",
+  "peak_error_time_s",
+  "transient_mae_mgdl",
+  "transient_rmse_mgdl",
+  "overshoot_mgdl",
+  "undershoot_mgdl",
+  "steady_state_mean_error_mgdl",
+  "steady_state_mae_mgdl",
+  "status"
+];
+
+function buildTransitionsCsv(session) {
+  const lines = [TRANSITION_CSV_HEADERS.join(",")];
+  const events = (session.transientAnalysis && session.transientAnalysis.events) || [];
+  events.forEach((ev) => {
+    const row = {
+      simulation_id: session.id,
+      event_id: ev.id,
+      start_time_s: ev.start_time_s,
+      direction: ev.direction,
+      from_mgdl: ev.from_mgdl,
+      to_mgdl: ev.to_mgdl,
+      delta_mgdl: ev.delta_mgdl,
+      settling_time_5mg_s: ev.settling_time_5mg_s,
+      settling_time_2pct_s: ev.settling_time_2pct_s,
+      rise_time_10_90_s: ev.rise_time_10_90_s,
+      fall_time_90_10_s: ev.fall_time_90_10_s,
+      peak_abs_error_mgdl: ev.peak_abs_error_mgdl,
+      peak_error_signed_mgdl: ev.peak_error_signed_mgdl,
+      peak_error_time_s: ev.peak_error_time_s,
+      transient_mae_mgdl: ev.transient_mae_mgdl,
+      transient_rmse_mgdl: ev.transient_rmse_mgdl,
+      overshoot_mgdl: ev.overshoot_mgdl,
+      undershoot_mgdl: ev.undershoot_mgdl,
+      steady_state_mean_error_mgdl: ev.steady_state_mean_error_mgdl,
+      steady_state_mae_mgdl: ev.steady_state_mae_mgdl,
+      status: ev.status
+    };
+    lines.push(TRANSITION_CSV_HEADERS.map((key) => csvCell(row[key])).join(","));
+  });
+  return lines.join("\n");
 }
 
 function downloadTextFile(filename, contents, mime) {
@@ -2057,6 +2840,12 @@ function exportSessionPdf(session) {
   return downloadBinaryFile(sessionFilenames(session).pdf, bytes, "application/pdf");
 }
 
+function exportSessionTransitions(session) {
+  if (!canExportSession(session)) return "";
+  markSessionExported(session);
+  return downloadTextFile(sessionFilenames(session).transitions, buildTransitionsCsv(session), "text/csv;charset=utf-8");
+}
+
 function exportSessionAll(session) {
   return exportSessionPdf(session);
 }
@@ -2114,11 +2903,39 @@ function buildRecordedSession(durationS, overrides, options) {
   return finalizeSimulationSession(session, (options && options.status) || "stopped");
 }
 
+function buildScenarioSession(scenario, durationS, options) {
+  const dt = CONFIG.dt;
+  const count = Math.round(durationS / dt) + 1;
+  const params = controlParamsFromNominal();
+  params.scenario = scenario;
+  params.initialGlucose = scenarioGlucose(scenario, 0, 200);
+  const input = nominalInput();
+  const session = createSimulationSession(params, options || { now: new Date("2026-09-29T10:00:00") });
+  const filterGlucose = freshFilter();
+  const filterOxygen = freshFilter();
+  for (let i = 0; i < count; i += 1) {
+    const t = Math.round(i * dt * 10) / 10;
+    const sample = runChain(Object.assign({}, input, {
+      glucose: scenarioGlucose(scenario, t, 200),
+      filterMode: "step",
+      filterState: filterGlucose,
+      filterStateOxygen: filterOxygen,
+      noiseNa: 0,
+      oxygenNoiseNa: 0
+    }));
+    sample.t = t;
+    recordSessionSample(session, sample, params);
+  }
+  return finalizeSimulationSession(session, (options && options.status) || "stopped");
+}
+
 const SimulationSession = {
   create: createSimulationSession,
   record: recordSessionSample,
   finalize: finalizeSimulationSession,
   metrics: calculateSessionMetrics,
+  analyzeTransient: analyzeTransientResponse,
+  analyzeTracking: analyzeContinuousTracking,
   needsExportWarning: sessionNeedsExportWarning
 };
 
@@ -2171,9 +2988,67 @@ function resolveGlucose(params) {
    Instances are created once. Updates replace point arrays.
    ============================================================ */
 
+const glucoseStepMarkerPlugin = {
+  id: "glucoseStepMarkers",
+  afterDraw(chart, _args, pluginOptions) {
+    const events = (pluginOptions && pluginOptions.events) || [];
+    if (!events.length) return;
+    const area = chart.chartArea;
+    const xScale = chart.scales && chart.scales.x;
+    if (!area || !xScale) return;
+    const ctx = chart.ctx;
+    ctx.save();
+    events.forEach((ev) => {
+      if (!Number.isFinite(ev.start_time_s)) return;
+      const x = xScale.getPixelForValue(ev.start_time_s);
+      if (x < area.left || x > area.right) return;
+      ctx.beginPath();
+      ctx.strokeStyle = "rgba(226, 177, 90, 0.32)";
+      ctx.lineWidth = 1;
+      ctx.setLineDash([3, 4]);
+      ctx.moveTo(x, area.top);
+      ctx.lineTo(x, area.bottom);
+      ctx.stroke();
+    });
+    ctx.restore();
+  }
+};
+
+function sessionStepEvents(session) {
+  if (!session || !session.samples || !session.samples.length) return [];
+  if (session.transientAnalysis && session.transientAnalysis.events) return session.transientAnalysis.events;
+  return analyzeTransientResponse(session.samples, {
+    sampleIntervalS: session.sampleIntervalS,
+    glucoseTia: session.configuration && session.configuration.glucose_tia
+  }).events;
+}
+
+function setGlucoseStepMarkers(chart, events, xmin, xmax) {
+  if (!chart) return;
+  const visible = (events || []).filter((ev) => {
+    if (!Number.isFinite(ev.start_time_s)) return false;
+    if (Number.isFinite(xmin) && ev.start_time_s < xmin) return false;
+    if (Number.isFinite(xmax) && ev.start_time_s > xmax) return false;
+    return true;
+  });
+  if (!chart.options.plugins) chart.options.plugins = {};
+  chart.options.plugins.glucoseStepMarkers = { events: visible };
+  if (chart.data.datasets[2]) {
+    chart.data.datasets[2].data = visible.map((ev) => ({
+      x: ev.start_time_s,
+      y: ev.to_mgdl,
+      event: ev
+    }));
+  }
+}
+
 function initCharts() {
   if (typeof Chart === "undefined") {
     throw new Error("Chart.js did not load");
+  }
+  if (typeof Chart.register === "function" && !glucoseStepMarkerPlugin._registered) {
+    Chart.register(glucoseStepMarkerPlugin);
+    glucoseStepMarkerPlugin._registered = true;
   }
   if (STATE.charts) {
     Object.keys(STATE.charts).forEach((key) => STATE.charts[key].destroy());
@@ -2201,7 +3076,14 @@ function initCharts() {
       responsive: true,
       maintainAspectRatio: false,
       plugins: {
-        legend: { display: showLegend, labels: { boxWidth: 12, color: "#c5d2e0" } },
+        legend: {
+          display: showLegend,
+          labels: {
+            boxWidth: 12,
+            color: "#c5d2e0",
+            filter(item) { return item.text !== "Step event"; }
+          }
+        },
         tooltip: {
           intersect: false,
           mode: "index",
@@ -2230,8 +3112,43 @@ function initCharts() {
   STATE.charts = {
     glucose: new Chart(document.getElementById("chart-glucose"), {
       type: "line",
-      data: { datasets: [line("Actual glucose", "#3cbfb4", false), line("Estimated glucose", "#e2b15a", true)] },
-      options: baseOptions("mg/dL", true)
+      data: {
+        datasets: [
+          line("Actual glucose", "#3cbfb4", false),
+          line("Estimated glucose", "#e2b15a", true),
+          {
+            label: "Step event",
+            data: [],
+            showLine: false,
+            borderColor: "rgba(226,177,90,0.55)",
+            backgroundColor: "rgba(226,177,90,0.4)",
+            pointRadius: 3,
+            pointHoverRadius: 5,
+            pointHitRadius: 8
+          }
+        ]
+      },
+      options: (function () {
+        const options = baseOptions("mg/dL", true);
+        options.plugins.glucoseStepMarkers = { events: [] };
+        options.plugins.tooltip.callbacks = {
+          afterBody(items) {
+            for (let i = 0; i < items.length; i += 1) {
+              const ev = items[i].raw && items[i].raw.event;
+              if (!ev) continue;
+              return [
+                formatMetric(ev.from_mgdl, 1) + " → " + formatMetric(ev.to_mgdl, 1) + " mg/dL",
+                "Peak error " + formatMetric(ev.peak_abs_error_mgdl, 2) + " mg/dL",
+                ev.settling_time_5mg_s != null
+                  ? "Settle ±5 " + formatMetric(ev.settling_time_5mg_s, 3) + " s"
+                  : "Settle ±5 —"
+              ];
+            }
+            return [];
+          }
+        };
+        return options;
+      }())
     }),
     current: new Chart(document.getElementById("chart-current"), {
       type: "line",
@@ -2320,6 +3237,7 @@ function updateCharts() {
   const charts = STATE.charts;
   charts.glucose.data.datasets[0].data = view.map((s) => chartPoint(s.t, s.glucose));
   charts.glucose.data.datasets[1].data = view.map((s) => chartPoint(s.t, s.glucoseEst));
+  setGlucoseStepMarkers(charts.glucose, sessionStepEvents(STATE.session), xmin, latest);
   charts.current.data.datasets[0].data = view.map((s) => chartPoint(s.t, s.iPhysical));
   charts.current.data.datasets[1].data = view.map((s) => chartPoint(s.t, s.iRecovered));
   charts.vout.data.datasets[0].data = view.map((s) => chartPoint(s.t, s.tia.saturated ? s.tia.clamped : s.tia.ideal));
@@ -2348,6 +3266,9 @@ function resetCharts() {
   Object.keys(STATE.charts).forEach((key) => {
     const chart = STATE.charts[key];
     chart.data.datasets.forEach((dataset) => { dataset.data = []; });
+    if (chart.options.plugins && chart.options.plugins.glucoseStepMarkers) {
+      chart.options.plugins.glucoseStepMarkers.events = [];
+    }
     chart.options.scales.x.min = undefined;
     chart.options.scales.x.max = undefined;
     chart.update("none");
@@ -2664,6 +3585,7 @@ function updateRunButtons() {
   $("btn-export-json").disabled = !exportable;
   $("btn-export-report").disabled = !exportable;
   $("btn-export-pdf").disabled = !exportable;
+  $("btn-export-transitions").disabled = !exportable;
 }
 
 function bufferRms(history, read) {
@@ -3028,6 +3950,93 @@ function resultsDl(title, entries) {
   return "<section><h3>" + escapeHtml(title) + "</h3><dl>" + rows + "</dl></section>";
 }
 
+function renderTransientResults(session) {
+  if (typeof document === "undefined") return;
+  const root = $("transient-block");
+  const tr = session.transientAnalysis || { summary: emptyTransientSummary(), events: [], filter: {}, interpretation: "" };
+  const tk = session.trackingAnalysis || {};
+  const s = tr.summary || emptyTransientSummary();
+  const f = tr.filter || {};
+  const theo = f.theoretical || theoreticalRcTimes(null);
+  const events = tr.events || [];
+  const cards = [
+    ["Step events", String(s.step_count), "discrete actual changes"],
+    ["Settled events", String(s.settled_5mg_count), "±5 mg/dL + 1 s hold"],
+    ["Mean settling time ±5 mg/dL", formatMetric(s.mean_settling_time_5mg_s, 3), "s"],
+    ["Worst settling time ±5 mg/dL", formatMetric(s.max_settling_time_5mg_s, 3), "s"],
+    ["Mean 10–90% rise time", formatMetric(s.mean_rise_time_10_90_s, 3), "s"],
+    ["Mean 90–10% fall time", formatMetric(s.mean_fall_time_90_10_s, 3), "s"],
+    ["Maximum transient error", formatMetric(s.max_peak_abs_error_mgdl, 2), "mg/dL"],
+    ["Mean event transient MAE", formatMetric(s.mean_event_transient_mae_mgdl, 2), "mg/dL"],
+    ["Steady-state MAE", formatMetric(s.mean_steady_state_mae_mgdl, 3), "mg/dL"],
+    ["Maximum overshoot", formatMetric(s.max_overshoot_mgdl, 2), "mg/dL"],
+    ["Maximum undershoot", formatMetric(s.max_undershoot_mgdl, 2), "mg/dL"]
+  ].map((item) => (
+    "<article><h3>" + escapeHtml(item[0]) + "</h3><p>" + escapeHtml(item[1]) + "</p><span>" + escapeHtml(item[2]) + "</span></article>"
+  )).join("");
+  const filterCards = [
+    ["Glucose filter RC", formatMetric(f.rc_s, 4), "s"],
+    ["Glucose filter fc", formatMetric(f.fc_hz, 4), "Hz"],
+    ["Simulation dt", formatMetric(f.dt_s, 3), "s"],
+    ["Current alpha", formatMetric(f.alpha, 4), "dt / (RC + dt)"]
+  ].map((item) => (
+    "<article><h3>" + escapeHtml(item[0]) + "</h3><p>" + escapeHtml(item[1]) + "</p><span>" + escapeHtml(item[2]) + "</span></article>"
+  )).join("");
+  const theoCards = [
+    ["tau", formatMetric(theo.tau_s, 4), "RC"],
+    ["t63.2", formatMetric(theo.t63_2_s, 4), "≈ tau"],
+    ["t90", formatMetric(theo.t90_s, 4), "≈ 2.303 τ"],
+    ["t95", formatMetric(theo.t95_s, 4), "≈ 2.996 τ"],
+    ["t98", formatMetric(theo.t98_s, 4), "≈ 3.912 τ"]
+  ].map((item) => (
+    "<article><h3>" + escapeHtml(item[0]) + "</h3><p>" + escapeHtml(item[1]) + "</p><span>" + escapeHtml(item[2]) + "</span></article>"
+  )).join("");
+  let table = "<p class=\"hint\">No discrete glucose steps detected in this session.</p>";
+  if (events.length) {
+    table = "<div class=\"event-table-wrap\"><table class=\"event-table\"><thead><tr>"
+      + "<th>#</th><th>Time</th><th>Direction</th><th>From</th><th>To</th><th>Δ</th>"
+      + "<th>Settle ±5</th><th>Settle ±2%</th><th>Rise/Fall</th><th>Peak error</th>"
+      + "<th>Overshoot/Undershoot</th><th>Status</th></tr></thead><tbody>"
+      + events.map((ev) => (
+        "<tr><td>" + escapeHtml(ev.id)
+        + "</td><td>" + escapeHtml(formatMetric(ev.start_time_s, 1))
+        + "</td><td>" + escapeHtml(ev.direction)
+        + "</td><td>" + escapeHtml(formatMetric(ev.from_mgdl, 1))
+        + "</td><td>" + escapeHtml(formatMetric(ev.to_mgdl, 1))
+        + "</td><td>" + escapeHtml(formatMetric(ev.delta_mgdl, 1))
+        + "</td><td>" + escapeHtml(formatMetric(ev.settling_time_5mg_s, 3))
+        + "</td><td>" + escapeHtml(formatMetric(ev.settling_time_2pct_s, 3))
+        + "</td><td>" + escapeHtml(ev.direction === "rising" ? formatMetric(ev.rise_time_10_90_s, 3) : formatMetric(ev.fall_time_90_10_s, 3))
+        + "</td><td>" + escapeHtml(formatMetric(ev.peak_abs_error_mgdl, 2))
+        + "</td><td>" + escapeHtml(formatMetric(ev.overshoot_mgdl, 2) + " / " + formatMetric(ev.undershoot_mgdl, 2))
+        + "</td><td>" + escapeHtml(ev.status)
+        + "</td></tr>"
+      )).join("")
+      + "</tbody></table></div>";
+  }
+  const trackCards = [
+    ["Moving samples", String(tk.moving_sample_count == null ? 0 : tk.moving_sample_count), "> 0.25 mg/dL/s"],
+    ["Tracking MAE", formatMetric(tk.mae_mgdl, 3), "mg/dL"],
+    ["Tracking RMSE", formatMetric(tk.rmse_mgdl, 3), "mg/dL"],
+    ["Max tracking error", formatMetric(tk.max_abs_error_mgdl, 3), "mg/dL"],
+    ["Best-fit lag", formatMetric(tk.best_fit_lag_s, 3), "s · 0–5 s search"]
+  ].map((item) => (
+    "<article><h3>" + escapeHtml(item[0]) + "</h3><p>" + escapeHtml(item[1]) + "</p><span>" + escapeHtml(item[2]) + "</span></article>"
+  )).join("");
+  root.innerHTML = "<h3>TRANSIENT RESPONSE</h3>"
+    + "<p class=\"provisional\">" + escapeHtml(tr.interpretation || "Step-response metrics characterize the simulated electronic/filter chain under artificial instantaneous glucose changes. Real electrochemical sensor dynamics are not yet modeled.") + "</p>"
+    + "<div class=\"metric-grid results-kpis\">" + cards + "</div>"
+    + "<h3>FILTER / SAMPLING</h3>"
+    + "<div class=\"metric-grid results-kpis\">" + filterCards + "</div>"
+    + "<h3>THEORETICAL RC RESPONSE</h3>"
+    + "<p class=\"hint\">First-order continuous-time RC values. They are not a measured implant or electrochemical sensor response. Sensor dynamics are not modeled.</p>"
+    + "<div class=\"metric-grid results-kpis\">" + theoCards + "</div>"
+    + "<h3>STEP EVENTS</h3>"
+    + table
+    + "<h3>CONTINUOUS TRACKING</h3>"
+    + "<div class=\"metric-grid results-kpis\">" + trackCards + "</div>";
+}
+
 function renderSessionResults(session, options) {
   if (typeof document === "undefined" || !session || !session.metrics) return;
   const cfg = session.configuration;
@@ -3122,6 +4131,7 @@ function renderSessionResults(session, options) {
       ["Maximum", formatMetric(m.temperature.max_c, 3) + " °C"]
     ])
   ].join("");
+  renderTransientResults(session);
   updateRunButtons();
   text("res-exported", session.exported ? "Exported" : "Not exported");
   if (!(options && options.silent)) {
@@ -3204,6 +4214,10 @@ function bindAll() {
   });
   $("btn-export-pdf").addEventListener("click", () => {
     exportSessionPdf(STATE.session);
+    if (STATE.session) renderSessionResults(STATE.session, { silent: true });
+  });
+  $("btn-export-transitions").addEventListener("click", () => {
+    exportSessionTransitions(STATE.session);
     if (STATE.session) renderSessionResults(STATE.session, { silent: true });
   });
   ["exp1", "exp2", "exp3", "exp4"].forEach((kind) => {
@@ -3289,6 +4303,10 @@ if (typeof module !== "undefined" && module.exports) {
     buildHtmlReport,
     buildSessionPdf,
     buildRecordedSession,
+    buildScenarioSession,
+    analyzeTransientResponse,
+    analyzeContinuousTracking,
+    buildTransitionsCsv,
     jsonSafe,
     jsonContainsNonFinite
   };

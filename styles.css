@@ -671,6 +671,17 @@ tr.is-ref td { background: rgba(60, 191, 180, 0.08); }
   text-align: right;
 }
 
+.transient-block { margin-top: 16px; }
+.transient-block h3 {
+  margin: 14px 0 8px;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+.event-table-wrap { overflow-x: auto; }
+.event-table { font-size: 12px; }
+.event-table th, .event-table td { white-space: nowrap; }
+
 .footer {
   margin-top: 18px;
   color: var(--muted);
