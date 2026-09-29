@@ -426,40 +426,42 @@
           </label>
           <p class="provisional">O2 COMPENSATION MODEL: PROVISIONAL. Off, or a coefficient of 0, leaves the glucose channel unchanged. This is not a glucose-oxidase model.</p>
         </section>
-
-        <section class="panel">
-          <h2>ADC</h2>
-          <p class="hint">One converter, three channels. CH1 glucose, CH2 oxygen, CH3 temperature placeholder. Bits and ADC reference are shared. Counts are independent.</p>
-          <label class="field" for="adc-bits">
-            <span class="field-label">Resolution</span>
-            <select id="adc-bits"></select>
-          </label>
-          <label class="field" for="adc-vref">
-            <span class="field-label">Reference voltage <span class="range">V</span></span>
-            <input id="adc-vref" type="number" min="0.5" max="5" step="0.01" value="3.3">
-          </label>
-          <p class="formula">count = round(VOUT / VREF_ADC · (2^N − 1))</p>
-          <p class="formula">V_ADC = count / (2^N − 1) · VREF_ADC</p>
-        </section>
-
-        <section class="panel">
-          <h2>Environment</h2>
-          <label class="field" for="temp-slider">
-            <span class="field-label">Temperature <span class="range">30 – 42 °C</span></span>
-            <span class="pair">
-              <input id="temp-slider" type="range" min="30" max="42" step="0.1" value="37">
-              <input id="temp-num" type="number" min="30" max="42" step="0.1" value="37" inputmode="decimal" autocomplete="off">
-              <span class="suffix">°C</span>
-            </span>
-          </label>
-          <label class="field" for="temp-coeff">
-            <span class="field-label">Temperature coefficient <span class="range">PROVISIONAL %/°C</span></span>
-            <input id="temp-coeff" type="number" min="-5" max="5" step="0.01" value="0">
-          </label>
-          <p class="formula">factor = 1 + (k/100) · (T − 37)</p>
-          <p class="provisional">TEMPERATURE COMPENSATION — PROVISIONAL. k = 0 disables the effect. This is not a medical temperature compensation. The physical glucose current is multiplied by the factor; the algorithm divides it back out.</p>
-        </section>
       </aside>
+    </div>
+
+    <div class="panel-row">
+      <section class="panel">
+        <h2>ADC</h2>
+        <p class="hint">One converter, three channels. CH1 glucose, CH2 oxygen, CH3 temperature placeholder. Bits and ADC reference are shared. Counts are independent.</p>
+        <label class="field" for="adc-bits">
+          <span class="field-label">Resolution</span>
+          <select id="adc-bits"></select>
+        </label>
+        <label class="field" for="adc-vref">
+          <span class="field-label">Reference voltage <span class="range">V</span></span>
+          <input id="adc-vref" type="number" min="0.5" max="5" step="0.01" value="3.3">
+        </label>
+        <p class="formula">count = round(VOUT / VREF_ADC · (2^N − 1))</p>
+        <p class="formula">V_ADC = count / (2^N − 1) · VREF_ADC</p>
+      </section>
+
+      <section class="panel">
+        <h2>Environment</h2>
+        <label class="field" for="temp-slider">
+          <span class="field-label">Temperature <span class="range">30 – 42 °C</span></span>
+          <span class="pair">
+            <input id="temp-slider" type="range" min="30" max="42" step="0.1" value="37">
+            <input id="temp-num" type="number" min="30" max="42" step="0.1" value="37" inputmode="decimal" autocomplete="off">
+            <span class="suffix">°C</span>
+          </span>
+        </label>
+        <label class="field" for="temp-coeff">
+          <span class="field-label">Temperature coefficient <span class="range">PROVISIONAL %/°C</span></span>
+          <input id="temp-coeff" type="number" min="-5" max="5" step="0.01" value="0">
+        </label>
+        <p class="formula">factor = 1 + (k/100) · (T − 37)</p>
+        <p class="provisional">TEMPERATURE COMPENSATION — PROVISIONAL. k = 0 disables the effect. This is not a medical temperature compensation. The physical glucose current is multiplied by the factor; the algorithm divides it back out.</p>
+      </section>
     </div>
 
     <section class="panel metrics" aria-label="Metrics">
