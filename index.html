@@ -354,14 +354,22 @@
             <span class="field-label">VREF <span class="range">V</span></span>
             <input id="vref" type="number" min="0" max="3.3" step="0.01" value="1.65">
           </label>
-          <label class="field" for="rf">
-            <span class="field-label">RF</span>
-            <select id="rf"></select>
-          </label>
-          <label class="field" for="cf">
-            <span class="field-label">CF</span>
-            <select id="cf"></select>
-          </label>
+          <div class="field tia-control">
+            <span class="field-label">RF <span class="range">preset or custom</span></span>
+            <div class="tia-entry">
+              <select id="rf-preset" class="tia-preset" aria-label="Glucose TIA RF preset"></select>
+              <input id="rf-mag" type="number" min="0" step="any" value="1" inputmode="decimal" autocomplete="off" aria-label="Glucose TIA RF value">
+              <select id="rf-unit" class="tia-unit" aria-label="Glucose TIA RF unit"></select>
+            </div>
+          </div>
+          <div class="field tia-control">
+            <span class="field-label">CF <span class="range">preset or custom</span></span>
+            <div class="tia-entry">
+              <select id="cf-preset" class="tia-preset" aria-label="Glucose TIA CF preset"></select>
+              <input id="cf-mag" type="number" min="0" step="any" value="100" inputmode="decimal" autocomplete="off" aria-label="Glucose TIA CF value">
+              <select id="cf-unit" class="tia-unit" aria-label="Glucose TIA CF unit"></select>
+            </div>
+          </div>
           <p class="static-line">fc <strong id="fc-readout">—</strong> · RC <strong id="rc-readout">—</strong></p>
           <p class="formula">VOUT = VREF + I(A) · RF</p>
           <p class="formula">fc = 1 / (2π · RF · CF)</p>
@@ -406,14 +414,22 @@
             <span class="field-label">Oxygen TIA VREF <span class="range">V</span></span>
             <input id="o2-vref" type="number" min="0" max="3.3" step="0.01" value="1.65">
           </label>
-          <label class="field" for="o2-rf">
-            <span class="field-label">Oxygen TIA RF</span>
-            <select id="o2-rf"></select>
-          </label>
-          <label class="field" for="o2-cf">
-            <span class="field-label">Oxygen TIA CF</span>
-            <select id="o2-cf"></select>
-          </label>
+          <div class="field tia-control">
+            <span class="field-label">Oxygen TIA RF <span class="range">preset or custom</span></span>
+            <div class="tia-entry">
+              <select id="o2-rf-preset" class="tia-preset" aria-label="Oxygen TIA RF preset"></select>
+              <input id="o2-rf-mag" type="number" min="0" step="any" value="1" inputmode="decimal" autocomplete="off" aria-label="Oxygen TIA RF value">
+              <select id="o2-rf-unit" class="tia-unit" aria-label="Oxygen TIA RF unit"></select>
+            </div>
+          </div>
+          <div class="field tia-control">
+            <span class="field-label">Oxygen TIA CF <span class="range">preset or custom</span></span>
+            <div class="tia-entry">
+              <select id="o2-cf-preset" class="tia-preset" aria-label="Oxygen TIA CF preset"></select>
+              <input id="o2-cf-mag" type="number" min="0" step="any" value="100" inputmode="decimal" autocomplete="off" aria-label="Oxygen TIA CF value">
+              <select id="o2-cf-unit" class="tia-unit" aria-label="Oxygen TIA CF unit"></select>
+            </div>
+          </div>
           <p class="static-line">fc <strong id="o2-fc">—</strong> · RC <strong id="o2-rc">—</strong></p>
           <p class="formula">I_oxygen = level · sensitivity + baseline + drift + noise</p>
           <label class="toggle" for="o2-influence">

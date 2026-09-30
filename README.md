@@ -26,15 +26,18 @@ El objetivo futuro es sustituir los modelos marcados **PROVISIONAL** por curvas 
 
 ## Cómo ejecutarlo
 
-Hace falta un navegador moderno (Chrome o Safari). No hay servidor, backend ni conexión de red.
+Hace falta Node.js 20+ o un navegador moderno (Chrome o Safari).
 
-1. Abrir `index.html`.
-2. El caso de referencia aparece al cargar: 200 mg/dL, sensibilidad 1 nA/(mg/dL), 37 °C, ruido 0, drift 0, VREF 1.65 V, RF 1 MΩ, ADC 12 bit.
-3. Pulsar **START SIMULATION** para el camino dinámico (ruido y filtro). **PAUSE** congela el tiempo. **STOP & ANALYZE** cierra la sesión y abre **Simulation results**. **RESET** vacía el historial; si hay resultados sin exportar, pide confirmación.
+1. `npm install` y `npm start` (o abrir `index.html` para solo la UI).
+2. La UI queda en `/`. La API versionada está en `/api/v1/` — ver [docs/API.md](docs/API.md).
+3. El caso de referencia aparece al cargar: 200 mg/dL, sensibilidad 1 nA/(mg/dL), 37 °C, ruido 0, drift 0, VREF 1.65 V, RF 1 MΩ, ADC 12 bit.
+4. Pulsar **START SIMULATION** para el camino dinámico (ruido y filtro). **PAUSE** congela el tiempo. **STOP & ANALYZE** cierra la sesión y abre **Simulation results**. **RESET** vacía el historial; si hay resultados sin exportar, pide confirmación.
 
-Chart.js 4.4.6 está incluido en `vendor/chart.umd.min.js` (licencia MIT). La aplicación no llama a APIs externas.
+Chart.js 4.4.6 está incluido en `vendor/chart.umd.min.js` (licencia MIT). La UI no llama a APIs externas; el motor de simulación es el mismo que usa la API.
 
 ## Arquitectura
+
+`app.js` sigue conteniendo el motor validado. `src/engine` lo reutiliza; `src/api` no reimplementa las ecuaciones.
 
 `app.js` separa el cálculo de la interfaz:
 

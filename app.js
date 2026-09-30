@@ -45,6 +45,17 @@ const CONFIG = {
     { label: "100 nF", farads: 100e-9, isDefault: true },
     { label: "1 µF", farads: 1e-6 }
   ],
+  rfUnits: [
+    { id: "k", label: "kΩ", scale: 1e3 },
+    { id: "M", label: "MΩ", scale: 1e6 }
+  ],
+  cfUnits: [
+    { id: "pF", label: "pF", scale: 1e-12 },
+    { id: "nF", label: "nF", scale: 1e-9 },
+    { id: "uF", label: "µF", scale: 1e-6 }
+  ],
+  rfLimits: { min: 1, max: 1e12 },
+  cfLimits: { min: 1e-15, max: 1 },
   scenarios: [
     { id: "stable", label: "Stable glucose" },
     { id: "rising", label: "Rising glucose" },
@@ -100,7 +111,8 @@ const STATE = {
   manualGlucose: CONFIG.glucose.default,
   selfTest: null,
   holdLast: false,
-  session: null
+  session: null,
+  tiaValues: { rf: 1e6, cf: 100e-9, oxygenRf: 1e6, oxygenCf: 100e-9 }
 };
 
 /* ============================================================
@@ -203,6 +215,80 @@ function calculateCutoffFrequency(rfOhms, cfFarads) {
   const rc = rfOhms * cfFarads;
   if (!(rc > 0) || !Number.isFinite(rc)) return { fc: NaN, rc: NaN };
   return { fc: 1 / (2 * Math.PI * rc), rc };
+}
+
+/* ============================================================
+   TIA RF/CF INPUT
+   Unit conversion and validation only. Does not change TIA/filter math.
+   ============================================================ */
+
+function parsePositiveMagnitude(value) {
+  if (typeof value === "number") {
+    return Number.isFinite(value) && value > 0 ? value : null;
+  }
+  if (value == null) return null;
+  const text = String(value).trim().replace(",", ".");
+  if (!text) return null;
+  const parsed = Number(text);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function lookupUnitScale(units, unit) {
+  if (unit == null) return null;
+  const key = String(unit).trim();
+  for (let i = 0; i < units.length; i += 1) {
+    const item = units[i];
+    if (item.id === key || item.label === key) return item.scale;
+  }
+  const aliases = {
+    k: 1e3, kohm: 1e3, "kΩ": 1e3,
+    M: 1e6, Mohm: 1e6, "MΩ": 1e6,
+    ohm: 1, "Ω": 1,
+    pF: 1e-12, nF: 1e-9, uF: 1e-6, "µF": 1e-6
+  };
+  return Number.isFinite(aliases[key]) ? aliases[key] : null;
+}
+
+function parseRfOhms(magnitude, unit) {
+  const mag = parsePositiveMagnitude(magnitude);
+  const scale = lookupUnitScale(CONFIG.rfUnits, unit);
+  if (mag == null || !(scale > 0)) return { ok: false, ohms: null };
+  const ohms = mag * scale;
+  if (!Number.isFinite(ohms) || ohms <= 0) return { ok: false, ohms: null };
+  if (ohms < CONFIG.rfLimits.min || ohms > CONFIG.rfLimits.max) return { ok: false, ohms: null };
+  return { ok: true, ohms: ohms };
+}
+
+function parseCfFarads(magnitude, unit) {
+  const mag = parsePositiveMagnitude(magnitude);
+  const scale = lookupUnitScale(CONFIG.cfUnits, unit);
+  if (mag == null || !(scale > 0)) return { ok: false, farads: null };
+  const farads = mag * scale;
+  if (!Number.isFinite(farads) || farads <= 0) return { ok: false, farads: null };
+  if (farads < CONFIG.cfLimits.min || farads > CONFIG.cfLimits.max) return { ok: false, farads: null };
+  return { ok: true, farads: farads };
+}
+
+function nearlyEqualSi(a, b) {
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return false;
+  const scale = Math.max(Math.abs(a), Math.abs(b), 1e-30);
+  return Math.abs(a - b) <= 1e-9 * scale;
+}
+
+function splitRfDisplay(ohms) {
+  if (ohms >= 1e6) return { mag: ohms / 1e6, unit: "M" };
+  return { mag: ohms / 1e3, unit: "k" };
+}
+
+function splitCfDisplay(farads) {
+  if (farads >= 1e-6 - 1e-18) return { mag: farads * 1e6, unit: "uF" };
+  if (farads >= 1e-9 - 1e-21) return { mag: farads * 1e9, unit: "nF" };
+  return { mag: farads * 1e12, unit: "pF" };
+}
+
+function formatMagnitudeInput(value) {
+  if (!Number.isFinite(value)) return "";
+  return String(Number(value.toPrecision(10)));
 }
 
 function filterAlpha(rfOhms, cfFarads, dt) {
@@ -387,8 +473,12 @@ const BioSenseAlgorithm = { run: bioSenseAlgorithm, assessSignalQuality };
 
 function runChain(input) {
   const o2 = oxygenSettings(input);
+  const sensorDrift = Number.isFinite(input.sensorDrift) ? input.sensorDrift : input.drift;
+  const modelDrift = Number.isFinite(input.modelDrift) ? input.modelDrift : input.drift;
+  const oxygenSensorDrift = Number.isFinite(input.oxygenSensorDrift) ? input.oxygenSensorDrift : o2.drift;
+  const oxygenModelDrift = Number.isFinite(input.oxygenModelDrift) ? input.oxygenModelDrift : o2.drift;
   const iRaw = GlucoseSensorModel.glucoseToCurrent(
-    input.glucose, input.sensitivity, input.baseline, input.drift, input.noiseNa
+    input.glucose, input.sensitivity, input.baseline, sensorDrift, input.noiseNa
   );
   const influence = OxygenSensorModel.applyOxygenInfluence(
     iRaw, o2.level, o2.influenceCoeff, o2.influenceEnabled
@@ -401,18 +491,18 @@ function runChain(input) {
   const compensated = TemperatureModel.applyTemperatureCompensation(
     glucoseElec.iRecovered, input.tempC, input.tempCoeff
   );
-  const glucoseEst = currentToGlucose(compensated.currentNa, input.baseline, input.drift, input.sensitivity);
+  const glucoseEst = currentToGlucose(compensated.currentNa, input.baseline, modelDrift, input.sensitivity);
   const error = Number.isFinite(glucoseEst) ? glucoseEst - input.glucose : NaN;
   const tempCorrectionNa = Number.isFinite(compensated.currentNa) && Number.isFinite(glucoseElec.iRecovered)
     ? compensated.currentNa - glucoseElec.iRecovered
     : NaN;
 
-  const oxygenRaw = OxygenSensorModel.oxygenToCurrent(o2.level, o2.sensitivity, o2.baseline, o2.drift, o2.noiseNa);
+  const oxygenRaw = OxygenSensorModel.oxygenToCurrent(o2.level, o2.sensitivity, o2.baseline, oxygenSensorDrift, o2.noiseNa);
   const oxygenElec = processChannel(
     oxygenRaw, o2.vref, o2.rf, o2.cf, input.vcc,
     input.adcBits, input.adcVref, input.filterMode, input.filterStateOxygen, input.dt
   );
-  const oxygenEst = currentToGlucose(oxygenElec.iRecovered, o2.baseline, o2.drift, o2.sensitivity);
+  const oxygenEst = currentToGlucose(oxygenElec.iRecovered, o2.baseline, oxygenModelDrift, o2.sensitivity);
   const temperature = temperatureChannel(input.tempC, input.adcBits, input.adcVref);
 
   const glucoseSignal = {
@@ -1091,6 +1181,120 @@ function runSelfTests() {
     "Rapid-session PDF remains a valid standalone file",
     rapidPdf[0] === 0x25 && rapidPdf[1] === 0x50 && rapidPdf[2] === 0x44 && rapidPdf[3] === 0x46,
     rapidPdf.length
+  );
+
+  function pdfLatin1String(bytes) {
+    let text = "";
+    for (let i = 0; i < bytes.length; i += 1) text += String.fromCharCode(bytes[i]);
+    return text;
+  }
+  function pdfHasByte(bytes, code) {
+    for (let i = 0; i < bytes.length; i += 1) {
+      if (bytes[i] === code) return true;
+    }
+    return false;
+  }
+
+  check("Null transient metric formats as N/A", formatNullableNumber(null, 3, " s") === "N/A", formatNullableNumber(null, 3, " s"));
+  check("Undefined transient metric formats as N/A", formatNullableNumber(undefined, 3, " s") === "N/A", formatNullableNumber(undefined, 3, " s"));
+  check("NaN formats as N/A", formatNullableNumber(NaN, 3, " s") === "N/A", formatNullableNumber(NaN, 3, " s"));
+  check("Infinity formats as N/A", formatNullableNumber(Infinity, 3, " s") === "N/A" && formatNullableNumber(-Infinity, 2, " mg/dL") === "N/A", "");
+  check("Zero formats as numeric zero, not N/A", formatNullableNumber(0, 3, " s") === "0.000 s", formatNullableNumber(0, 3, " s"));
+  check("Valid numeric value keeps requested precision", formatNullableNumber(1.291666, 3, " s") === "1.292 s", formatNullableNumber(1.291666, 3, " s"));
+
+  const risingPdf = buildSessionPdf(risingSession, []);
+  const risingPdfText = pdfLatin1String(risingPdf);
+  check(
+    "Rising session PDF renders null transients as N/A without control glyphs",
+    risingSession.transientAnalysis.summary.step_count === 0
+      && risingPdf[0] === 0x25 && risingPdf[1] === 0x50 && risingPdf[2] === 0x44 && risingPdf[3] === 0x46
+      && risingPdfText.indexOf("N/A") >= 0
+      && risingPdfText.indexOf("Mean settle +/-5 N/A") >= 0
+      && risingPdfText.indexOf("Mean 10-90 rise N/A") >= 0
+      && risingPdfText.indexOf("Max transient error N/A") >= 0
+      && risingPdfText.indexOf("Steady-state MAE N/A") >= 0
+      && !pdfHasByte(risingPdf, 0x14),
+    risingSession.transientAnalysis.summary.step_count
+  );
+  const rapidPdfText = pdfLatin1String(rapidPdf);
+  check(
+    "Rapid scenario PDF still renders numeric transient values",
+    rapidPdfText.indexOf("Step events 12") >= 0
+      && rapidPdfText.indexOf("1.300 s") >= 0
+      && rapidPdfText.indexOf("Mean settle +/-5 N/A") < 0
+      && !pdfHasByte(rapidPdf, 0x14),
+    ""
+  );
+  check(
+    "Existing PDF still begins with a valid %PDF signature",
+    risingPdf[0] === 0x25 && risingPdf[1] === 0x50 && risingPdf[2] === 0x44 && risingPdf[3] === 0x46
+      && pdfAgain[0] === 0x25 && pdfAgain[1] === 0x50,
+    ""
+  );
+  const risingJson = JSON.parse(sessionJsonString(risingSession));
+  check(
+    "JSON keeps null transient metrics as null, not N/A",
+    risingJson.transientAnalysis.summary.step_count === 0
+      && risingJson.transientAnalysis.summary.mean_settling_time_5mg_s === null
+      && risingJson.transientAnalysis.summary.mean_rise_time_10_90_s === null
+      && risingJson.transientAnalysis.summary.max_peak_abs_error_mgdl === null
+      && risingJson.transientAnalysis.summary.mean_steady_state_mae_mgdl === null
+      && sessionJsonString(risingSession).indexOf('"N/A"') < 0,
+    JSON.stringify(risingJson.transientAnalysis.summary.mean_settling_time_5mg_s)
+  );
+
+  const cf100 = parseCfFarads(100, "nF");
+  check(
+    "Preset 100 nF still converts to 100e-9 F",
+    cf100.ok && nearlyEqualSi(cf100.farads, 100e-9),
+    cf100.farads
+  );
+  const cf220 = parseCfFarads(220, "nF");
+  check(
+    "Custom 220 nF converts to 2.2e-7 F",
+    cf220.ok && nearlyEqualSi(cf220.farads, 2.2e-7),
+    cf220.farads
+  );
+  const cut220 = calculateCutoffFrequency(1e6, cf220.farads);
+  check("1 MΩ + 220 nF gives RC ≈ 0.22 s", Math.abs(cut220.rc - 0.22) < 1e-12, cut220.rc);
+  check("1 MΩ + 220 nF gives fc ≈ 0.7234 Hz", Math.abs(cut220.fc - 0.7234) < 5e-5, cut220.fc);
+  const cf47 = parseCfFarads(47, "nF");
+  check("Custom 47 nF works", cf47.ok && nearlyEqualSi(cf47.farads, 47e-9), cf47.farads);
+  const rf15 = parseRfOhms(1.5, "M");
+  check("Custom 1.5 MΩ works", rf15.ok && nearlyEqualSi(rf15.ohms, 1.5e6), rf15.ohms);
+  check(
+    "Zero and negative RF/CF values are rejected",
+    !parseRfOhms(0, "M").ok && !parseRfOhms(-1, "k").ok && !parseCfFarads(0, "nF").ok && !parseCfFarads(-47, "nF").ok,
+    ""
+  );
+  check(
+    "Invalid RF/CF text is rejected",
+    !parseRfOhms("abc", "M").ok && !parseRfOhms("", "k").ok && !parseCfFarads("nF", "nF").ok && !parseCfFarads(" ", "uF").ok,
+    ""
+  );
+  const customCfg = captureConfiguration(controlParamsFromNominal({ rf: 1e6, cf: 2.2e-7 }));
+  check(
+    "Exported configuration contains the exact custom RF/CF",
+    nearlyEqualSi(customCfg.glucose_tia.rf_ohm, 1e6)
+      && nearlyEqualSi(customCfg.glucose_tia.cf_f, 2.2e-7)
+      && Math.abs(customCfg.glucose_tia.rc_s - 0.22) < 1e-12
+      && Math.abs(customCfg.glucose_tia.fc_hz - 0.7234) < 5e-5,
+    customCfg.glucose_tia.cf_f
+  );
+  const customJson = buildSessionJson(createSimulationSession(controlParamsFromNominal({ rf: 1.5e6, cf: 47e-9 }), { id: "BS-TIA-CUSTOM" }));
+  check(
+    "JSON export keeps exact custom 1.5 MΩ and 47 nF",
+    nearlyEqualSi(customJson.configuration.glucose_tia.rf_ohm, 1.5e6)
+      && nearlyEqualSi(customJson.configuration.glucose_tia.cf_f, 47e-9),
+    customJson.configuration.glucose_tia.rf_ohm + " / " + customJson.configuration.glucose_tia.cf_f
+  );
+  const nomCut = calculateCutoffFrequency(1e6, 100e-9);
+  check(
+    "Existing nominal 100 nF reference remains unchanged",
+    Math.abs(nomCut.fc - 1.5915494309189535) < 1e-12
+      && Math.abs(nomCut.rc - 0.1) < 1e-15
+      && Math.abs(nominal.cutoff.fc - 1.5915494309189535) < 1e-12,
+    nomCut.fc
   );
 
   return { pass: results.every((item) => item.pass), results, nominal };
@@ -2141,6 +2345,13 @@ function formatMetric(value, digits) {
   return String(value);
 }
 
+function formatNullableNumber(value, decimals, suffix) {
+  if (value == null || typeof value !== "number" || !Number.isFinite(value)) return "N/A";
+  const digits = Number.isFinite(decimals) ? decimals : 0;
+  const extra = suffix == null ? "" : String(suffix);
+  return value.toFixed(digits) + extra;
+}
+
 function captureLiveChartImages() {
   const images = {};
   if (typeof document === "undefined") return images;
@@ -2305,8 +2516,35 @@ function buildHtmlReport(session, chartImages) {
     + "</body></html>";
 }
 
+function pdfLatin1Text(text) {
+  const raw = String(text == null ? "" : text);
+  let out = "";
+  for (let i = 0; i < raw.length; i += 1) {
+    const code = raw.charCodeAt(i);
+    if (code === 0x2014 || code === 0x2013 || code === 0x2212) {
+      out += "-";
+      continue;
+    }
+    if (code === 0x00b1) {
+      out += "+/-";
+      continue;
+    }
+    if (code === 0x2192) {
+      out += "->";
+      continue;
+    }
+    if (code < 32 || code === 127) continue;
+    if (code > 126) {
+      out += "?";
+      continue;
+    }
+    out += raw.charAt(i);
+  }
+  return out;
+}
+
 function pdfEscape(text) {
-  return String(text == null ? "" : text).replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
+  return pdfLatin1Text(text).replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
 }
 
 function strToPdfBytes(text) {
@@ -2515,7 +2753,7 @@ function buildSessionPdf(session, extraImages) {
   function addText(value, size, color) {
     const fontSize = size || 10;
     const leading = fontSize + 3;
-    wrapPdfLine(value, maxText, fontSize).forEach((line) => {
+    wrapPdfLine(pdfLatin1Text(value), maxText, fontSize).forEach((line) => {
       ensureSpace(leading);
       stream += "BT /F1 " + fontSize + " Tf " + (color || "0 0 0") + " rg "
         + margin.toFixed(2) + " " + (y - fontSize).toFixed(2) + " Td (" + pdfEscape(line) + ") Tj ET\n";
@@ -2563,35 +2801,35 @@ function buildSessionPdf(session, extraImages) {
   addGap(6);
   addText("ID: " + session.id);
   addText("Date: " + session.startTime);
-  addText("Duration: " + formatMetric(session.duration_s, 1) + " s");
+  addText("Duration: " + formatNullableNumber(session.duration_s, 1, " s"));
   addText("Samples: " + session.samples.length);
-  addText("Sampling interval: " + session.sampleIntervalS + " s");
+  addText("Sampling interval: " + formatNullableNumber(session.sampleIntervalS, 1, " s"));
   addGap(8);
   addText("CONFIGURATION", 12, "0.24 0.75 0.71");
-  addText("Initial glucose: " + formatMetric(cfg.glucose_sensor.initial_glucose_mgdl, 2) + " mg/dL");
-  addText("Initial oxygen: " + formatMetric(cfg.oxygen_sensor.initial_oxygen_sim, 2) + " sim");
-  addText("Initial temperature: " + formatMetric(cfg.temperature.initial_c, 2) + " C");
-  addText("ADC: " + cfg.adc.bits + " bit, VREF " + formatMetric(cfg.adc.vref, 3) + " V");
-  addText("Glucose TIA: RF " + cfg.glucose_tia.rf_ohm + " ohm, CF " + cfg.glucose_tia.cf_f + " F, VREF " + formatMetric(cfg.glucose_tia.vref, 3) + " V, fc " + formatMetric(cfg.glucose_tia.fc_hz, 4) + " Hz");
-  addText("Oxygen TIA: RF " + cfg.oxygen_tia.rf_ohm + " ohm, CF " + cfg.oxygen_tia.cf_f + " F, VREF " + formatMetric(cfg.oxygen_tia.vref, 3) + " V, fc " + formatMetric(cfg.oxygen_tia.fc_hz, 4) + " Hz");
-  addText("Glucose sensitivity " + formatMetric(cfg.glucose_sensor.sensitivity_na_per_mgdl, 4) + " nA/(mg/dL), baseline " + formatMetric(cfg.glucose_sensor.baseline_na, 3) + " nA, noise RMS " + formatMetric(cfg.glucose_sensor.noise_rms_na, 3) + " nA, drift " + formatMetric(cfg.glucose_sensor.drift_na, 3) + " nA");
-  addText("Oxygen sensitivity " + formatMetric(cfg.oxygen_sensor.sensitivity_na_per_sim, 4) + " nA/sim, baseline " + formatMetric(cfg.oxygen_sensor.baseline_na, 3) + " nA, noise RMS " + formatMetric(cfg.oxygen_sensor.noise_rms_na, 3) + " nA, drift " + formatMetric(cfg.oxygen_sensor.drift_na, 3) + " nA");
-  addText("Temperature coefficient: " + formatMetric(cfg.temperature.coefficient_percent_per_c, 3) + " %/C  PROVISIONAL");
-  addText("O2 -> glucose influence: " + (cfg.oxygen_glucose_influence.enabled ? "ON" : "OFF") + ", coefficient " + formatMetric(cfg.oxygen_glucose_influence.coefficient, 3) + "  PROVISIONAL");
+  addText("Initial glucose: " + formatNullableNumber(cfg.glucose_sensor.initial_glucose_mgdl, 2, " mg/dL"));
+  addText("Initial oxygen: " + formatNullableNumber(cfg.oxygen_sensor.initial_oxygen_sim, 2, " sim"));
+  addText("Initial temperature: " + formatNullableNumber(cfg.temperature.initial_c, 2, " C"));
+  addText("ADC: " + cfg.adc.bits + " bit, VREF " + formatNullableNumber(cfg.adc.vref, 3, " V"));
+  addText("Glucose TIA: RF " + cfg.glucose_tia.rf_ohm + " ohm, CF " + cfg.glucose_tia.cf_f + " F, VREF " + formatNullableNumber(cfg.glucose_tia.vref, 3, " V") + ", fc " + formatNullableNumber(cfg.glucose_tia.fc_hz, 4, " Hz"));
+  addText("Oxygen TIA: RF " + cfg.oxygen_tia.rf_ohm + " ohm, CF " + cfg.oxygen_tia.cf_f + " F, VREF " + formatNullableNumber(cfg.oxygen_tia.vref, 3, " V") + ", fc " + formatNullableNumber(cfg.oxygen_tia.fc_hz, 4, " Hz"));
+  addText("Glucose sensitivity " + formatNullableNumber(cfg.glucose_sensor.sensitivity_na_per_mgdl, 4, " nA/(mg/dL)") + ", baseline " + formatNullableNumber(cfg.glucose_sensor.baseline_na, 3, " nA") + ", noise RMS " + formatNullableNumber(cfg.glucose_sensor.noise_rms_na, 3, " nA") + ", drift " + formatNullableNumber(cfg.glucose_sensor.drift_na, 3, " nA"));
+  addText("Oxygen sensitivity " + formatNullableNumber(cfg.oxygen_sensor.sensitivity_na_per_sim, 4, " nA/sim") + ", baseline " + formatNullableNumber(cfg.oxygen_sensor.baseline_na, 3, " nA") + ", noise RMS " + formatNullableNumber(cfg.oxygen_sensor.noise_rms_na, 3, " nA") + ", drift " + formatNullableNumber(cfg.oxygen_sensor.drift_na, 3, " nA"));
+  addText("Temperature coefficient: " + formatNullableNumber(cfg.temperature.coefficient_percent_per_c, 3, " %/C") + "  PROVISIONAL");
+  addText("O2 -> glucose influence: " + (cfg.oxygen_glucose_influence.enabled ? "ON" : "OFF") + ", coefficient " + formatNullableNumber(cfg.oxygen_glucose_influence.coefficient, 3, "") + "  PROVISIONAL");
   addGap(8);
   addText("GLUCOSE RESULTS", 12, "0.24 0.75 0.71");
-  addText("Mean actual " + formatMetric(m.glucose.mean_actual_mgdl, 3) + " mg/dL, mean estimated " + formatMetric(m.glucose.mean_estimated_mgdl, 3) + " mg/dL");
-  addText("MAE " + formatMetric(m.glucose.mae_mgdl, 4) + " mg/dL, RMSE " + formatMetric(m.glucose.rmse_mgdl, 4) + " mg/dL, max |error| " + formatMetric(m.glucose.max_abs_error_mgdl, 4) + " mg/dL");
-  addText("Mean TIA VOUT " + formatMetric(m.glucose.mean_tia_vout_v, 4) + " V, ADC " + formatMetric(m.glucose.adc_min, 0) + " to " + formatMetric(m.glucose.adc_max, 0));
+  addText("Mean actual " + formatNullableNumber(m.glucose.mean_actual_mgdl, 3, " mg/dL") + ", mean estimated " + formatNullableNumber(m.glucose.mean_estimated_mgdl, 3, " mg/dL"));
+  addText("MAE " + formatNullableNumber(m.glucose.mae_mgdl, 4, " mg/dL") + ", RMSE " + formatNullableNumber(m.glucose.rmse_mgdl, 4, " mg/dL") + ", max |error| " + formatNullableNumber(m.glucose.max_abs_error_mgdl, 4, " mg/dL"));
+  addText("Mean TIA VOUT " + formatNullableNumber(m.glucose.mean_tia_vout_v, 4, " V") + ", ADC " + formatNullableNumber(m.glucose.adc_min, 0, "") + " to " + formatNullableNumber(m.glucose.adc_max, 0, ""));
   addText("TIA saturation count " + m.glucose.tia_saturation_count + ", ADC clipping count " + m.glucose.adc_clipping_count);
   addGap(6);
   addText("OXYGEN RESULTS  PROVISIONAL", 12, "0.24 0.75 0.71");
-  addText("Mean level " + formatMetric(m.oxygen.mean_level_sim, 3) + " sim, recovered " + formatMetric(m.oxygen.mean_recovered_sim, 3) + " sim, MAE " + formatMetric(m.oxygen.mae_sim, 4) + " sim");
-  addText("Mean TIA VOUT " + formatMetric(m.oxygen.mean_tia_vout_v, 4) + " V, ADC " + formatMetric(m.oxygen.adc_min, 0) + " to " + formatMetric(m.oxygen.adc_max, 0));
+  addText("Mean level " + formatNullableNumber(m.oxygen.mean_level_sim, 3, " sim") + ", recovered " + formatNullableNumber(m.oxygen.mean_recovered_sim, 3, " sim") + ", MAE " + formatNullableNumber(m.oxygen.mae_sim, 4, " sim"));
+  addText("Mean TIA VOUT " + formatNullableNumber(m.oxygen.mean_tia_vout_v, 4, " V") + ", ADC " + formatNullableNumber(m.oxygen.adc_min, 0, "") + " to " + formatNullableNumber(m.oxygen.adc_max, 0, ""));
   addText("TIA saturation count " + m.oxygen.tia_saturation_count + ", ADC clipping count " + m.oxygen.adc_clipping_count);
   addGap(6);
   addText("TEMPERATURE RESULTS", 12, "0.24 0.75 0.71");
-  addText("Mean " + formatMetric(m.temperature.mean_c, 3) + " C, min " + formatMetric(m.temperature.min_c, 3) + " C, max " + formatMetric(m.temperature.max_c, 3) + " C");
+  addText("Mean " + formatNullableNumber(m.temperature.mean_c, 3, " C") + ", min " + formatNullableNumber(m.temperature.min_c, 3, " C") + ", max " + formatNullableNumber(m.temperature.max_c, 3, " C"));
   addGap(8);
   const tr = session.transientAnalysis || { summary: emptyTransientSummary(), events: [], filter: {}, interpretation: "" };
   const tk = session.trackingAnalysis || {};
@@ -2601,12 +2839,13 @@ function buildSessionPdf(session, extraImages) {
   addText("TRANSIENT RESPONSE", 12, "0.24 0.75 0.71");
   addText(tr.interpretation || "Step-response metrics characterize the simulated electronic/filter chain under artificial instantaneous glucose changes. Real electrochemical sensor dynamics are not yet modeled.", 9);
   addText("Step events " + ts.step_count + ", settled " + ts.settled_5mg_count + ", unsettled " + ts.unsettled_5mg_count);
-  addText("Mean settle +/-5 " + formatMetric(ts.mean_settling_time_5mg_s, 3) + " s, worst " + formatMetric(ts.max_settling_time_5mg_s, 3) + " s");
-  addText("Mean 10-90 rise " + formatMetric(ts.mean_rise_time_10_90_s, 3) + " s, mean 90-10 fall " + formatMetric(ts.mean_fall_time_90_10_s, 3) + " s");
-  addText("Max transient error " + formatMetric(ts.max_peak_abs_error_mgdl, 2) + " mg/dL, mean event MAE " + formatMetric(ts.mean_event_transient_mae_mgdl, 2) + " mg/dL");
-  addText("Steady-state MAE " + formatMetric(ts.mean_steady_state_mae_mgdl, 3) + " mg/dL, max overshoot " + formatMetric(ts.max_overshoot_mgdl, 2) + ", max undershoot " + formatMetric(ts.max_undershoot_mgdl, 2));
-  addText("Glucose filter RC " + formatMetric(tf.rc_s, 4) + " s, fc " + formatMetric(tf.fc_hz, 4) + " Hz, dt " + formatMetric(tf.dt_s, 3) + " s, alpha " + formatMetric(tf.alpha, 4));
-  addText("THEORETICAL RC RESPONSE  tau " + formatMetric(theo.tau_s, 4) + " s, t63.2 " + formatMetric(theo.t63_2_s, 4) + " s, t90 " + formatMetric(theo.t90_s, 4) + " s, t95 " + formatMetric(theo.t95_s, 4) + " s, t98 " + formatMetric(theo.t98_s, 4) + " s", 9);
+  addText("Mean settle +/-5 " + formatNullableNumber(ts.mean_settling_time_5mg_s, 3, " s") + ", worst " + formatNullableNumber(ts.max_settling_time_5mg_s, 3, " s"));
+  addText("Mean settle +/-2% " + formatNullableNumber(ts.mean_settling_time_2pct_s, 3, " s") + ", worst " + formatNullableNumber(ts.max_settling_time_2pct_s, 3, " s"));
+  addText("Mean 10-90 rise " + formatNullableNumber(ts.mean_rise_time_10_90_s, 3, " s") + ", mean 90-10 fall " + formatNullableNumber(ts.mean_fall_time_90_10_s, 3, " s"));
+  addText("Max transient error " + formatNullableNumber(ts.max_peak_abs_error_mgdl, 2, " mg/dL") + ", mean event MAE " + formatNullableNumber(ts.mean_event_transient_mae_mgdl, 2, " mg/dL") + ", mean event RMSE " + formatNullableNumber(ts.mean_event_transient_rmse_mgdl, 2, " mg/dL"));
+  addText("Steady-state MAE " + formatNullableNumber(ts.mean_steady_state_mae_mgdl, 3, " mg/dL") + ", max overshoot " + formatNullableNumber(ts.max_overshoot_mgdl, 2, "") + ", max undershoot " + formatNullableNumber(ts.max_undershoot_mgdl, 2, ""));
+  addText("Glucose filter RC " + formatNullableNumber(tf.rc_s, 4, " s") + ", fc " + formatNullableNumber(tf.fc_hz, 4, " Hz") + ", dt " + formatNullableNumber(tf.dt_s, 3, " s") + ", alpha " + formatNullableNumber(tf.alpha, 4, ""));
+  addText("THEORETICAL RC RESPONSE  tau " + formatNullableNumber(theo.tau_s, 4, " s") + ", t63.2 " + formatNullableNumber(theo.t63_2_s, 4, " s") + ", t90 " + formatNullableNumber(theo.t90_s, 4, " s") + ", t95 " + formatNullableNumber(theo.t95_s, 4, " s") + ", t98 " + formatNullableNumber(theo.t98_s, 4, " s"), 9);
   addText("These are theoretical first-order RC values, not a measured electrochemical sensor response.", 8, "0.56 0.63 0.71");
   addGap(4);
   addText("STEP EVENTS", 11, "0.24 0.75 0.71");
@@ -2615,13 +2854,15 @@ function buildSessionPdf(session, extraImages) {
   } else {
     const shown = tr.events.slice(0, 16);
     shown.forEach((ev) => {
-      const rf = ev.direction === "rising" ? formatMetric(ev.rise_time_10_90_s, 3) : formatMetric(ev.fall_time_90_10_s, 3);
+      const rf = ev.direction === "rising"
+        ? formatNullableNumber(ev.rise_time_10_90_s, 3, "")
+        : formatNullableNumber(ev.fall_time_90_10_s, 3, "");
       addText(
-        "#" + ev.id + "  t=" + formatMetric(ev.start_time_s, 1) + "s  " + ev.direction
-        + "  " + formatMetric(ev.from_mgdl, 1) + "->" + formatMetric(ev.to_mgdl, 1)
-        + "  settle5=" + formatMetric(ev.settling_time_5mg_s, 3)
+        "#" + ev.id + "  t=" + formatNullableNumber(ev.start_time_s, 1, "s") + "  " + ev.direction
+        + "  " + formatNullableNumber(ev.from_mgdl, 1, "") + "->" + formatNullableNumber(ev.to_mgdl, 1, "")
+        + "  settle5=" + formatNullableNumber(ev.settling_time_5mg_s, 3, "")
         + "  rf=" + rf
-        + "  peak=" + formatMetric(ev.peak_abs_error_mgdl, 2)
+        + "  peak=" + formatNullableNumber(ev.peak_abs_error_mgdl, 2, "")
         + "  " + ev.status,
         8
       );
@@ -2631,10 +2872,10 @@ function buildSessionPdf(session, extraImages) {
   addGap(4);
   addText("CONTINUOUS TRACKING", 11, "0.24 0.75 0.71");
   addText("Moving samples " + (tk.moving_sample_count == null ? 0 : tk.moving_sample_count)
-    + ", MAE " + formatMetric(tk.mae_mgdl, 3)
-    + " mg/dL, RMSE " + formatMetric(tk.rmse_mgdl, 3)
-    + " mg/dL, max " + formatMetric(tk.max_abs_error_mgdl, 3)
-    + " mg/dL, best-fit lag " + formatMetric(tk.best_fit_lag_s, 3) + " s");
+    + ", MAE " + formatNullableNumber(tk.mae_mgdl, 3, " mg/dL")
+    + ", RMSE " + formatNullableNumber(tk.rmse_mgdl, 3, " mg/dL")
+    + ", max " + formatNullableNumber(tk.max_abs_error_mgdl, 3, " mg/dL")
+    + ", best-fit lag " + formatNullableNumber(tk.best_fit_lag_s, 3, " s"));
   addGap(8);
   addText("CHARTS  full run", 12, "0.24 0.75 0.71");
   (extraImages || []).forEach((image) => {
@@ -3307,6 +3548,110 @@ function fillSelect(id, options, valueOf, labelOf, isDefault) {
   });
 }
 
+function fillUnitSelect(id, units, selectedId) {
+  const select = $(id);
+  select.textContent = "";
+  units.forEach((unit) => {
+    const node = document.createElement("option");
+    node.value = unit.id;
+    node.textContent = unit.label;
+    if (unit.id === selectedId) node.selected = true;
+    select.appendChild(node);
+  });
+}
+
+function fillPresetSelect(id, options, valueOf, labelOf) {
+  const select = $(id);
+  select.textContent = "";
+  options.forEach((option) => {
+    const node = document.createElement("option");
+    node.value = String(valueOf(option));
+    node.textContent = labelOf(option);
+    if (option.isDefault) node.selected = true;
+    select.appendChild(node);
+  });
+  const custom = document.createElement("option");
+  custom.value = "custom";
+  custom.textContent = "Custom…";
+  select.appendChild(custom);
+}
+
+function matchingPresetValue(kind, si) {
+  const options = kind === "rf" ? CONFIG.rfOptions : CONFIG.cfOptions;
+  const key = kind === "rf" ? "ohms" : "farads";
+  for (let i = 0; i < options.length; i += 1) {
+    if (nearlyEqualSi(options[i][key], si)) return String(options[i][key]);
+  }
+  return "custom";
+}
+
+function writeTiaFields(spec, si) {
+  const parts = spec.kind === "rf" ? splitRfDisplay(si) : splitCfDisplay(si);
+  $(spec.magId).value = formatMagnitudeInput(parts.mag);
+  $(spec.unitId).value = parts.unit;
+  $(spec.presetId).value = matchingPresetValue(spec.kind, si);
+}
+
+function applyTiaParsed(spec) {
+  const parsed = spec.kind === "rf"
+    ? parseRfOhms($(spec.magId).value, $(spec.unitId).value)
+    : parseCfFarads($(spec.magId).value, $(spec.unitId).value);
+  const ok = !!parsed.ok;
+  $(spec.magId).classList.toggle("is-invalid", !ok);
+  if (!ok) return false;
+  const si = spec.kind === "rf" ? parsed.ohms : parsed.farads;
+  STATE.tiaValues[spec.stateKey] = si;
+  $(spec.presetId).value = matchingPresetValue(spec.kind, si);
+  return true;
+}
+
+function bindTiaControl(spec) {
+  const preset = $(spec.presetId);
+  const mag = $(spec.magId);
+  const unit = $(spec.unitId);
+  preset.addEventListener("change", () => {
+    if (preset.value !== "custom") {
+      const si = parseFloat(preset.value);
+      if (Number.isFinite(si) && si > 0) {
+        STATE.tiaValues[spec.stateKey] = si;
+        writeTiaFields(spec, si);
+        mag.classList.remove("is-invalid");
+      }
+    }
+    onParamChanged();
+  });
+  mag.addEventListener("input", () => {
+    applyTiaParsed(spec);
+    onParamChanged();
+  });
+  unit.addEventListener("change", () => {
+    applyTiaParsed(spec);
+    onParamChanged();
+  });
+  mag.addEventListener("change", () => {
+    if (!applyTiaParsed(spec)) {
+      writeTiaFields(spec, STATE.tiaValues[spec.stateKey]);
+      mag.classList.remove("is-invalid");
+    }
+    onParamChanged();
+  });
+}
+
+function initTiaControls() {
+  fillPresetSelect("rf-preset", CONFIG.rfOptions, (option) => option.ohms, (option) => option.label);
+  fillPresetSelect("cf-preset", CONFIG.cfOptions, (option) => option.farads, (option) => option.label);
+  fillPresetSelect("o2-rf-preset", CONFIG.rfOptions, (option) => option.ohms, (option) => option.label);
+  fillPresetSelect("o2-cf-preset", CONFIG.cfOptions, (option) => option.farads, (option) => option.label);
+  fillUnitSelect("rf-unit", CONFIG.rfUnits, "M");
+  fillUnitSelect("cf-unit", CONFIG.cfUnits, "nF");
+  fillUnitSelect("o2-rf-unit", CONFIG.rfUnits, "M");
+  fillUnitSelect("o2-cf-unit", CONFIG.cfUnits, "nF");
+  writeTiaFields({ kind: "rf", presetId: "rf-preset", magId: "rf-mag", unitId: "rf-unit" }, STATE.tiaValues.rf);
+  writeTiaFields({ kind: "cf", presetId: "cf-preset", magId: "cf-mag", unitId: "cf-unit" }, STATE.tiaValues.cf);
+  writeTiaFields({ kind: "rf", presetId: "o2-rf-preset", magId: "o2-rf-mag", unitId: "o2-rf-unit" }, STATE.tiaValues.oxygenRf);
+  writeTiaFields({ kind: "cf", presetId: "o2-cf-preset", magId: "o2-cf-mag", unitId: "o2-cf-unit" }, STATE.tiaValues.oxygenCf);
+}
+
 function readControls() {
   const bits = parseInt($("adc-bits").value, 10);
   return {
@@ -3318,8 +3663,8 @@ function readControls() {
     tempC: readNumber("temp-num", CONFIG.temperature.default, CONFIG.temperature.min, CONFIG.temperature.max),
     tempCoeff: readNumber("temp-coeff", CONFIG.tempCoeff.default, CONFIG.tempCoeff.min, CONFIG.tempCoeff.max),
     vref: readNumber("vref", CONFIG.vref.default, CONFIG.vref.min, CONFIG.vref.max),
-    rf: readNumber("rf", 1e6, 1, 1e12),
-    cf: readNumber("cf", 100e-9, 1e-15, 1),
+    rf: STATE.tiaValues.rf,
+    cf: STATE.tiaValues.cf,
     vcc: CONFIG.vcc,
     adcBits: CONFIG.adcBits.indexOf(bits) >= 0 ? bits : CONFIG.adcBitsDefault,
     adcVref: readNumber("adc-vref", CONFIG.adcVref.default, CONFIG.adcVref.min, CONFIG.adcVref.max),
@@ -3329,8 +3674,8 @@ function readControls() {
     oxygenDrift: readNumber("o2-drift-num", CONFIG.drift.default, CONFIG.drift.min, CONFIG.drift.max),
     oxygenNoiseRms: readNumber("o2-noise-num", CONFIG.noise.default, CONFIG.noise.min, CONFIG.noise.max),
     oxygenVref: readNumber("o2-vref", CONFIG.vref.default, CONFIG.vref.min, CONFIG.vref.max),
-    oxygenRf: readNumber("o2-rf", 1e6, 1, 1e12),
-    oxygenCf: readNumber("o2-cf", 100e-9, 1e-15, 1),
+    oxygenRf: STATE.tiaValues.oxygenRf,
+    oxygenCf: STATE.tiaValues.oxygenCf,
     oxygenInfluenceEnabled: $("o2-influence").checked,
     oxygenInfluenceCoeff: readNumber("o2-influence-coeff", CONFIG.oxygen.influence.default, CONFIG.oxygen.influence.min, CONFIG.oxygen.influence.max)
   };
@@ -4174,11 +4519,39 @@ function bindAll() {
   bindPair("o2-drift-slider", "o2-drift-num", CONFIG.drift.min, CONFIG.drift.max, () => onParamChanged());
 
   [
-    "sensitivity", "baseline", "temp-coeff", "vref", "rf", "cf", "adc-bits", "adc-vref",
-    "o2-sensitivity", "o2-baseline", "o2-vref", "o2-rf", "o2-cf", "o2-influence-coeff"
+    "sensitivity", "baseline", "temp-coeff", "vref", "adc-bits", "adc-vref",
+    "o2-sensitivity", "o2-baseline", "o2-vref", "o2-influence-coeff"
   ].forEach((id) => {
     $(id).addEventListener("input", onParamChanged);
     $(id).addEventListener("change", onParamChanged);
+  });
+  bindTiaControl({
+    kind: "rf",
+    presetId: "rf-preset",
+    magId: "rf-mag",
+    unitId: "rf-unit",
+    stateKey: "rf"
+  });
+  bindTiaControl({
+    kind: "cf",
+    presetId: "cf-preset",
+    magId: "cf-mag",
+    unitId: "cf-unit",
+    stateKey: "cf"
+  });
+  bindTiaControl({
+    kind: "rf",
+    presetId: "o2-rf-preset",
+    magId: "o2-rf-mag",
+    unitId: "o2-rf-unit",
+    stateKey: "oxygenRf"
+  });
+  bindTiaControl({
+    kind: "cf",
+    presetId: "o2-cf-preset",
+    magId: "o2-cf-mag",
+    unitId: "o2-cf-unit",
+    stateKey: "oxygenCf"
   });
   $("o2-influence").addEventListener("change", () => {
     syncInfluence();
@@ -4242,10 +4615,7 @@ function syncInfluence() {
 }
 
 function init() {
-  fillSelect("rf", CONFIG.rfOptions, (option) => option.ohms, (option) => option.label, (option) => !!option.isDefault);
-  fillSelect("cf", CONFIG.cfOptions, (option) => option.farads, (option) => option.label, (option) => !!option.isDefault);
-  fillSelect("o2-rf", CONFIG.rfOptions, (option) => option.ohms, (option) => option.label, (option) => !!option.isDefault);
-  fillSelect("o2-cf", CONFIG.cfOptions, (option) => option.farads, (option) => option.label, (option) => !!option.isDefault);
+  initTiaControls();
   fillSelect("adc-bits", CONFIG.adcBits, (bits) => bits, (bits) => bits + " bit", (bits) => bits === CONFIG.adcBitsDefault);
   fillSelect("scenario", CONFIG.scenarios, (option) => option.id, (option) => option.label, (option) => option.id === "stable");
   text("vcc-readout", CONFIG.vcc.toFixed(1) + " V");
@@ -4271,6 +4641,7 @@ if (typeof document !== "undefined") {
 
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
+    CONFIG,
     runSelfTests,
     runChain,
     nominalInput,
@@ -4286,6 +4657,7 @@ if (typeof module !== "undefined" && module.exports) {
     calculateMetrics,
     gaussianNoise,
     scenarioGlucose,
+    isScripted,
     oxygenToCurrent,
     applyOxygenInfluence,
     applyTemperatureInfluence,
@@ -4295,6 +4667,10 @@ if (typeof module !== "undefined" && module.exports) {
     recordSessionSample,
     finalizeSimulationSession,
     calculateSessionMetrics,
+    sessionControlParams,
+    captureConfiguration,
+    chainRequest,
+    freshFilter,
     sessionNeedsExportWarning,
     buildRawCsv,
     buildSummaryCsv,
@@ -4306,9 +4682,14 @@ if (typeof module !== "undefined" && module.exports) {
     buildScenarioSession,
     analyzeTransientResponse,
     analyzeContinuousTracking,
+    attachSessionDynamicAnalysis,
     buildTransitionsCsv,
     jsonSafe,
-    jsonContainsNonFinite
+    jsonContainsNonFinite,
+    formatNullableNumber,
+    formatMetric,
+    parseRfOhms,
+    parseCfFarads
   };
   if (require.main === module) {
     const report = runSelfTests();

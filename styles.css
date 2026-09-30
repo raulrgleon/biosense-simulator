@@ -365,6 +365,19 @@ h3 { margin: 0; font-size: 12px; font-weight: 650; letter-spacing: 0.04em; }
 
 .pair input[type="number"] { width: 96px; flex: none; }
 
+.tia-entry {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.tia-entry .tia-preset { flex: 1; min-width: 0; }
+.tia-entry input[type="number"] { width: 88px; flex: none; }
+.tia-entry .tia-unit { width: 76px; flex: none; }
+input.is-invalid, select.is-invalid { border-color: var(--red); }
+
 .suffix {
   color: var(--muted);
   font-family: var(--mono);
