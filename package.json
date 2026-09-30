@@ -2,7 +2,7 @@
   "name": "biosense-simulator",
   "version": "2.2.0",
   "private": true,
-  "description": "BioSense / BioDot bench simulator with a shared-engine REST API",
+  "description": "BioSense / BioDot bench simulator with a shared-engine REST API and remote MCP server",
   "main": "src/api/server.js",
   "scripts": {
     "start": "node src/api/server.js",
@@ -13,10 +13,17 @@
     "node": ">=20"
   },
   "dependencies": {
+    "@modelcontextprotocol/express": "^2.0.1",
+    "@modelcontextprotocol/node": "^2.1.0",
+    "@modelcontextprotocol/server": "^2.2.0",
     "cors": "^2.8.5",
     "express": "^4.21.2",
     "express-rate-limit": "^7.5.1",
     "helmet": "^8.1.0",
-    "swagger-ui-express": "^5.0.1"
+    "swagger-ui-express": "^5.0.1",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/client": "^2.2.0"
   }
 }

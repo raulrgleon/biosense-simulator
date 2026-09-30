@@ -12,6 +12,7 @@ const engine = require("../engine");
 const { loadApiConfig } = require("./config");
 const { createRouter } = require("./routes");
 const { buildOpenApi } = require("./openapi");
+const { mountMcp } = require("../mcp/mount");
 
 const PUBLIC_PATHS = new Set(["/api/v1/health", "/openapi.json"]);
 
@@ -88,6 +89,7 @@ function createApp(options) {
     skip: (req) => req.path === "/api/v1/health" || !apiConfig.production
   });
   app.use("/api", limiter);
+  app.use("/mcp", limiter);
 
   app.use((req, res, next) => {
     if (PUBLIC_PATHS.has(req.path) || req.path.indexOf("/api/docs") === 0) return next();
@@ -134,6 +136,7 @@ function createApp(options) {
 
   const { router } = createRouter(express, apiConfig);
   app.use("/api/v1", router);
+  mountMcp(app, apiConfig);
 
   const spec = buildOpenApi(engine.CONFIG.version);
   app.get("/openapi.json", (req, res) => {

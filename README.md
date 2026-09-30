@@ -29,7 +29,7 @@ El objetivo futuro es sustituir los modelos marcados **PROVISIONAL** por curvas 
 Hace falta Node.js 20+ o un navegador moderno (Chrome o Safari).
 
 1. `npm install` y `npm start` (o abrir `index.html` para solo la UI).
-2. La UI queda en `/`. La API versionada está en `/api/v1/` — ver [docs/API.md](docs/API.md).
+2. La UI queda en `/`. La API versionada está en `/api/v1/`. El servidor MCP remoto está en `/mcp` — ver [docs/API.md](docs/API.md).
 3. El caso de referencia aparece al cargar: 200 mg/dL, sensibilidad 1 nA/(mg/dL), 37 °C, ruido 0, drift 0, VREF 1.65 V, RF 1 MΩ, ADC 12 bit.
 4. Pulsar **START SIMULATION** para el camino dinámico (ruido y filtro). **PAUSE** congela el tiempo. **STOP & ANALYZE** cierra la sesión y abre **Simulation results**. **RESET** vacía el historial; si hay resultados sin exportar, pide confirmación.
 
@@ -37,7 +37,7 @@ Chart.js 4.4.6 está incluido en `vendor/chart.umd.min.js` (licencia MIT). La UI
 
 ## Arquitectura
 
-`app.js` sigue conteniendo el motor validado. `src/engine` lo reutiliza; `src/api` no reimplementa las ecuaciones.
+`app.js` sigue conteniendo el motor validado. `src/engine` lo reutiliza; `src/api` y `src/mcp` llaman a las mismas funciones de servicio y no reimplementan las ecuaciones.
 
 `app.js` separa el cálculo de la interfaz:
 

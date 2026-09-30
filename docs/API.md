@@ -37,7 +37,26 @@ Authorization: Bearer $BIOSENSE_API_KEY
 
 Public without a key: `GET /api/v1/health`, `GET /openapi.json`, `GET /api/docs`.
 
+The remote MCP endpoint `https://YOUR_DOMAIN/mcp` is not public. MCP clients must send the same bearer token:
+
+```http
+Authorization: Bearer $BIOSENSE_API_KEY
+```
+
+That header is the interoperable MCP HTTP authentication for Streamable HTTP. ChatGPT Apps / Connectors that require a full OAuth 2.1 authorization server are a separate follow-up; this repository does not invent a local identity provider.
+
 Simulation routes return `401` JSON if the bearer token is missing or wrong.
+
+## Remote MCP
+
+Transport: MCP Streamable HTTP (official `@modelcontextprotocol/server` v2).
+
+- Endpoint: `/mcp`
+- Tools: `info`, `defaults`, `scenarios`, `simulate`, `sweep`, `compare`
+- `health` is not exposed as a tool
+- MCP calls the shared engine through `src/api/service.js`; it does not HTTP-loopback to `/api/v1`
+
+Connect a compatible MCP client to `https://YOUR_DOMAIN/mcp` with `Authorization: Bearer $BIOSENSE_API_KEY`.
 
 ## OpenAPI
 
