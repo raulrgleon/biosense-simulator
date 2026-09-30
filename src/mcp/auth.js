@@ -60,6 +60,7 @@ function createMcpAuthMiddleware(apiConfig) {
   });
 
   return function mcpAuth(req, res, next) {
+    if (req.method === "OPTIONS") return next();
     if (!apiConfig.apiKey && !apiConfig.production && !oauth.enabled) return next();
     if (apiConfig.production && !apiConfig.apiKey) {
       return res.status(503).json({

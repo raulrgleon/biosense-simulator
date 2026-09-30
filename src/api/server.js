@@ -17,6 +17,58 @@ const { mountProtectedResourceMetadata } = require("../mcp/oauth");
 
 const PUBLIC_PATHS = new Set(["/api/v1/health", "/openapi.json"]);
 
+function isMcpBrowserPath(pathname) {
+  return pathname === "/mcp"
+    || pathname === "/mcp/"
+    || pathname === "/.well-known/oauth-protected-resource"
+    || pathname === "/.well-known/oauth-protected-resource/mcp"
+    || pathname.indexOf("/.well-known/oauth-protected-resource/") === 0;
+}
+
+function originHost(origin) {
+  if (!origin) return null;
+  try {
+    return new URL(origin).host;
+  } catch (_err) {
+    return "invalid";
+  }
+}
+
+function classifyAuthType(authorization) {
+  const header = String(authorization || "");
+  const match = header.match(/^Bearer\s+(\S+)/i);
+  if (!match) return "none";
+  return match[1].split(".").length === 3 ? "oauth" : "api_key";
+}
+
+function mcpAccessFields(req, res) {
+  if (req.path !== "/mcp" && req.path !== "/mcp/") return {};
+  const body = req.body && typeof req.body === "object" ? req.body : {};
+  const authInfo = req.auth;
+  const authType = classifyAuthType(req.get("authorization"));
+  const scopes = authInfo && Array.isArray(authInfo.scopes) ? authInfo.scopes : [];
+  let scopeResult = "none";
+  if (authType !== "none") {
+    if (res.statusCode === 403 && !authInfo) scopeResult = "insufficient";
+    else if (scopes.length === 0) scopeResult = res.statusCode < 400 ? "ok" : "rejected";
+    else scopeResult = "ok";
+  }
+  const userAgent = req.get("user-agent") || "";
+  return {
+    mcp_method: typeof body.method === "string" ? body.method : null,
+    mcp_protocol_version: req.get("mcp-protocol-version")
+      || (body.params && body.params.protocolVersion)
+      || null,
+    authenticated: Boolean(authInfo),
+    auth_type: authType,
+    issuer_valid: authInfo && authType === "oauth" ? true : null,
+    audience_valid: authInfo && authType === "oauth" ? true : null,
+    scope_result: scopeResult,
+    user_agent: userAgent ? userAgent.slice(0, 160) : null,
+    origin_host: originHost(req.get("origin"))
+  };
+}
+
 function requestId() {
   return crypto.randomUUID();
 }
@@ -57,15 +109,32 @@ function createApp(options) {
   });
 
   const originList = apiConfig.allowedOrigins;
-  app.use(cors({
-    origin(origin, callback) {
-      if (!origin) return callback(null, true);
-      if (!apiConfig.production && originList.length === 0) return callback(null, true);
-      if (originList.indexOf(origin) >= 0) return callback(null, true);
-      return callback(new Error("Origin not allowed"));
-    },
-    credentials: false
-  }));
+  app.use((req, res, next) => {
+    const mcpOpen = isMcpBrowserPath(req.path);
+    cors({
+      origin(origin, callback) {
+        if (!origin) return callback(null, true);
+        if (mcpOpen) return callback(null, true);
+        if (!apiConfig.production && originList.length === 0) return callback(null, true);
+        if (originList.indexOf(origin) >= 0) return callback(null, true);
+        return callback(new Error("Origin not allowed"));
+      },
+      credentials: false,
+      allowedHeaders: [
+        "Authorization",
+        "Content-Type",
+        "Accept",
+        "MCP-Protocol-Version",
+        "Mcp-Session-Id",
+        "Last-Event-ID"
+      ],
+      exposedHeaders: [
+        "WWW-Authenticate",
+        "Mcp-Session-Id",
+        "MCP-Protocol-Version"
+      ]
+    })(req, res, next);
+  });
 
   app.use(express.json({ limit: apiConfig.bodyLimit }));
   app.use((err, req, res, next) => {
@@ -123,14 +192,14 @@ function createApp(options) {
     res.on("finish", () => {
       if (req.path === "/api/v1/health") return;
       const simId = req.biosense && req.biosense.simulationId;
-      console.log(JSON.stringify({
+      console.log(JSON.stringify(Object.assign({
         request_id: req.requestId,
         endpoint: req.method + " " + req.path,
         status: res.statusCode,
         duration_ms: Date.now() - start,
         simulation_id: simId || null,
         uptime_s: Math.round((Date.now() - started) / 1000)
-      }));
+      }, mcpAccessFields(req, res))));
     });
     next();
   });

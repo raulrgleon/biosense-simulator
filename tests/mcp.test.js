@@ -211,3 +211,60 @@ test("MCP Streamable HTTP and REST isolation", async (t) => {
     assert.equal(invalid.structuredContent.error.field, "adc.bits");
   });
 });
+
+test("MCP CORS allows ChatGPT origin without opening REST", async (t) => {
+  const app = createApp({
+    config: {
+      nodeEnv: "production",
+      production: true,
+      port: 0,
+      apiKey: API_KEY,
+      allowedOrigins: [],
+      rateLimitPerMinute: 600,
+      limits: { maxDurationS: 3600, maxSamples: 100000, maxSweepPoints: 100, maxCompareRuns: 50 },
+      bodyLimit: "256kb"
+    }
+  });
+  const http = await listen(app);
+  t.after(() => http.close());
+
+  const chatgpt = { Origin: "https://chatgpt.com" };
+
+  await t.test("preflight and unauthenticated POST /mcp from chatgpt.com are not CORS_FORBIDDEN", async () => {
+    const preflight = await fetch(http.url + "/mcp", {
+      method: "OPTIONS",
+      headers: {
+        Origin: "https://chatgpt.com",
+        "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Headers": "authorization,content-type,mcp-protocol-version"
+      }
+    });
+    const denied = await rawMcp(http.url, { headers: chatgpt });
+    const allowed = await rawMcp(http.url, {
+      headers: Object.assign({ Authorization: "Bearer " + API_KEY }, chatgpt)
+    });
+    assert.equal(preflight.status, 204);
+    assert.equal(preflight.headers.get("access-control-allow-origin"), "https://chatgpt.com");
+    assert.equal(denied.status, 401);
+    assert.equal(denied.headers.get("access-control-allow-origin"), "https://chatgpt.com");
+    assert.match(denied.headers.get("www-authenticate") || "", /Bearer/i);
+    assert.ok(!denied.text.includes("CORS_FORBIDDEN"));
+    assert.equal(allowed.status, 200);
+    assert.equal(allowed.headers.get("access-control-allow-origin"), "https://chatgpt.com");
+  });
+
+  await t.test("production REST still rejects chatgpt.com when allowedOrigins is empty", async () => {
+    const res = await fetch(http.url + "/api/v1/simulate", {
+      method: "POST",
+      headers: {
+        Origin: "https://chatgpt.com",
+        Authorization: "Bearer " + API_KEY,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ scenario: "meal", duration_s: 1, sample_interval_s: 0.1 })
+    });
+    const json = await res.json();
+    assert.equal(res.status, 403);
+    assert.equal(json.error.code, "CORS_FORBIDDEN");
+  });
+});
