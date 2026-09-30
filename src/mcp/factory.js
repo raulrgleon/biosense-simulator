@@ -1,10 +1,11 @@
 "use strict";
 
 const { z } = require("zod");
-const { McpServer } = require("@modelcontextprotocol/server");
+const { McpServer, requireScopes } = require("@modelcontextprotocol/server");
 const engine = require("../engine");
 const { SWEEP_PATHS } = require("../engine/validation");
 const { DISCLAIMER } = require("../api/mapper");
+const { SCOPE_READ, SCOPE_SIMULATE, toolSecurityMeta } = require("./oauth");
 
 const SCENARIO_IDS = engine.CONFIG.scenarios.map((item) => item.id);
 const ADC_BITS = engine.CONFIG.adcBits;
@@ -165,7 +166,9 @@ function createBiosenseMcpServer(service) {
       "Return simulator capabilities, supported scenarios, ADC bit depths, and scientific units.",
       "Use this first when you need to know which scenario IDs, ADC bits, or units are valid.",
       "Does not run a simulation. Glucose model is PROVISIONAL. Oxygen unit is sim."
-    ].join(" ")
+    ].join(" "),
+    scopeChallenge: requireScopes(SCOPE_READ),
+    _meta: toolSecurityMeta("info")
   }, () => {
     const payload = service.info();
     return toolOk(payload, compactJson(payload));
@@ -177,7 +180,9 @@ function createBiosenseMcpServer(service) {
       "Return the current default electronics and sensor configuration used when a simulate/sweep/compare field is omitted.",
       "Use this to see baseline RF, CF, VREF, ADC bits, and sensor coefficients before overriding them.",
       "Does not run a simulation."
-    ].join(" ")
+    ].join(" "),
+    scopeChallenge: requireScopes(SCOPE_READ),
+    _meta: toolSecurityMeta("defaults")
   }, () => {
     const payload = service.defaults();
     return toolOk(payload, compactJson(payload));
@@ -189,7 +194,9 @@ function createBiosenseMcpServer(service) {
       "List supported glucose waveform scenarios with their IDs and descriptions.",
       "Use this when choosing the scenario argument for simulate, sweep, or compare.",
       "Scenarios are simulated signals only. meal is not a clinical meal model."
-    ].join(" ")
+    ].join(" "),
+    scopeChallenge: requireScopes(SCOPE_READ),
+    _meta: toolSecurityMeta("scenarios")
   }, () => {
     const payload = service.scenarios();
     return toolOk(payload, compactJson(payload));
@@ -203,7 +210,9 @@ function createBiosenseMcpServer(service) {
       "Set random_seed for reproducibility. Drift is drift_na_per_min. Oxygen is sim, not mmHg.",
       DISCLAIMER
     ].join(" "),
-    inputSchema: simulateInput
+    inputSchema: simulateInput,
+    scopeChallenge: requireScopes(SCOPE_SIMULATE),
+    _meta: toolSecurityMeta("simulate")
   }, (args) => {
     try {
       const result = service.simulate(Object.assign({}, args, {
@@ -223,6 +232,8 @@ function createBiosenseMcpServer(service) {
       "parameter must be one of the allowlisted dotted paths. values is a non-empty array of finite numbers.",
       "Does not declare a winner. include_samples defaults to false."
     ].join(" "),
+    scopeChallenge: requireScopes(SCOPE_SIMULATE),
+    _meta: toolSecurityMeta("sweep"),
     inputSchema: z.object({
       parameter: z.enum(SWEEP_PATHS).describe("Allowlisted dotted path to vary. Example glucose_tia.cf_f."),
       values: z.array(z.number().finite()).min(1).describe("Finite numeric values for the swept parameter, in the parameter's native unit."),
@@ -247,6 +258,8 @@ function createBiosenseMcpServer(service) {
       "runs must contain at least two objects with name and configuration. No winner is declared.",
       "include_samples defaults to false."
     ].join(" "),
+    scopeChallenge: requireScopes(SCOPE_SIMULATE),
+    _meta: toolSecurityMeta("compare"),
     inputSchema: z.object({
       random_seed: z.number().int().min(0).max(4294967295).optional().describe("Shared seed across compared runs."),
       include_samples: z.boolean().optional().describe("If true, attach samples to every run. Default false."),

@@ -13,6 +13,7 @@ const { loadApiConfig } = require("./config");
 const { createRouter } = require("./routes");
 const { buildOpenApi } = require("./openapi");
 const { mountMcp } = require("../mcp/mount");
+const { mountProtectedResourceMetadata } = require("../mcp/oauth");
 
 const PUBLIC_PATHS = new Set(["/api/v1/health", "/openapi.json"]);
 
@@ -136,6 +137,7 @@ function createApp(options) {
 
   const { router } = createRouter(express, apiConfig);
   app.use("/api/v1", router);
+  mountProtectedResourceMetadata(app, apiConfig.oauth);
   mountMcp(app, apiConfig);
 
   const spec = buildOpenApi(engine.CONFIG.version);

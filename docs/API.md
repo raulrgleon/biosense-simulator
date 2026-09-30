@@ -19,7 +19,7 @@ The UI is still served at `/`. The API listens on `PORT` (default 3000).
 
 | Variable | Purpose |
 | --- | --- |
-| `BIOSENSE_API_KEY` | Bearer token. Required in production. |
+| `BIOSENSE_API_KEY` | Bearer token. Required in production. Kept for Cursor, the official MCP SDK, and internal clients. |
 | `BIOSENSE_ALLOWED_ORIGINS` | Comma-separated CORS allowlist. Do not use `*` in production. |
 | `BIOSENSE_RATE_LIMIT_PER_MINUTE` | Production rate limit. Default 60. |
 | `BIOSENSE_MAX_DURATION_S` | Max simulation duration. Default 3600. |
@@ -28,6 +28,9 @@ The UI is still served at `/`. The API listens on `PORT` (default 3000).
 | `BIOSENSE_MAX_COMPARE_RUNS` | Max compare runs. Default 50. |
 | `PORT` | Listen port. Default 3000. |
 | `NODE_ENV` | `production` refuses to start without an API key. |
+| `AUTH0_DOMAIN` | Auth0 tenant host only, for example `your-tenant.us.auth0.com`. Leave unset until the tenant exists. |
+| `AUTH0_AUDIENCE` | Must match the Auth0 API Identifier and the MCP resource: `https://tuhoy.com/mcp`. |
+| `AUTH0_ISSUER` | Optional exact issuer override. Defaults to `https://$AUTH0_DOMAIN/`. Must match Auth0 metadata, including the trailing slash. |
 
 ## Authentication
 
@@ -37,15 +40,38 @@ Authorization: Bearer $BIOSENSE_API_KEY
 
 Public without a key: `GET /api/v1/health`, `GET /openapi.json`, `GET /api/docs`.
 
-The remote MCP endpoint `https://YOUR_DOMAIN/mcp` is not public. MCP clients must send the same bearer token:
+The remote MCP endpoint `https://tuhoy.com/mcp` accepts two bearer credentials in parallel:
 
 ```http
 Authorization: Bearer $BIOSENSE_API_KEY
+Authorization: Bearer <Auth0 access token>
 ```
 
-That header is the interoperable MCP HTTP authentication for Streamable HTTP. ChatGPT Apps / Connectors that require a full OAuth 2.1 authorization server are a separate follow-up; this repository does not invent a local identity provider.
+`BIOSENSE_API_KEY` is unchanged for Cursor, the official MCP SDK, and internal tests. REST `/api/v1/*` still accepts only that key.
 
-Simulation routes return `401` JSON if the bearer token is missing or wrong.
+OAuth 2.1 is for ChatGPT. The MCP resource identifier is `https://tuhoy.com/mcp` (the most specific URI; the origin also serves the UI and REST API). Protected Resource Metadata is published at:
+
+- `GET /.well-known/oauth-protected-resource`
+- `GET /.well-known/oauth-protected-resource/mcp`
+
+Those documents stay unpublished (404) until `AUTH0_DOMAIN` is configured, so an incomplete Auth0 setup cannot advertise a broken authorization server.
+
+Unauthenticated `/mcp` requests return `401` with `WWW-Authenticate` including `resource_metadata="https://tuhoy.com/.well-known/oauth-protected-resource"` and the scopes below once Auth0 is enabled.
+
+OAuth access tokens are verified with Auth0 JWKS: signature, issuer, audience/resource, `exp`, `nbf`, and scopes. A bearer token that merely exists is not trusted.
+
+### MCP scopes
+
+The six tools are read/compute only. Two scopes are enough:
+
+| Scope | Tools | Why |
+| --- | --- | --- |
+| `biosense:read` | `info`, `defaults`, `scenarios` | Capability and configuration metadata. No engine run. |
+| `biosense:simulate` | `simulate`, `sweep`, `compare` | Shared-engine calculations. Same risk class, so one scope. |
+
+There is no write or admin scope. ChatGPT should request both scopes. Each tool advertises `securitySchemes: [{ type: "oauth2", scopes: [...] }]` in `_meta` so ChatGPT can start OAuth linking.
+
+Simulation routes return `401` JSON if the REST bearer token is missing or wrong.
 
 ## Remote MCP
 
