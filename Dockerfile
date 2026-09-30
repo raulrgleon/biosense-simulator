@@ -6,5 +6,5 @@ COPY . .
 ENV NODE_ENV=production
 ENV PORT=80
 ENV BIOSENSE_ALLOWED_ORIGINS=https://tuhoy.com,https://www.tuhoy.com
-EXPOSE 80
+EXPOSE 80 3000
 CMD ["node", "src/api/server.js"]

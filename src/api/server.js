@@ -1,6 +1,7 @@
 "use strict";
 
 const path = require("path");
+const http = require("http");
 const crypto = require("crypto");
 const express = require("express");
 const cors = require("cors");
@@ -192,18 +193,37 @@ function createApp(options) {
   return app;
 }
 
-function start() {
+function listenOn(app, port) {
+  return new Promise((resolve, reject) => {
+    const server = http.createServer(app);
+    server.once("error", reject);
+    server.listen(port, "0.0.0.0", () => {
+      console.log(JSON.stringify({
+        event: "listen",
+        service: "biosense-simulator-api",
+        port: port,
+        env: process.env.NODE_ENV || "development"
+      }));
+      resolve(server);
+    });
+  });
+}
+
+async function start() {
   const apiConfig = loadApiConfig(process.env);
   const app = createApp({ config: apiConfig });
-  const server = app.listen(apiConfig.port, "0.0.0.0", () => {
-    console.log(JSON.stringify({
-      event: "listen",
-      service: "biosense-simulator-api",
-      port: apiConfig.port,
-      env: apiConfig.nodeEnv
-    }));
-  });
-  return server;
+  const ports = [apiConfig.port];
+  if (apiConfig.port !== 80) ports.push(80);
+  const servers = [];
+  for (const port of ports) {
+    try {
+      servers.push(await listenOn(app, port));
+    } catch (err) {
+      if (port === apiConfig.port) throw err;
+      console.error("[biosense] extra port " + port + " unavailable: " + (err && err.message));
+    }
+  }
+  return servers[0];
 }
 
 if (require.main === module) start();
