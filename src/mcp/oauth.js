@@ -3,7 +3,7 @@
 const { createRemoteJWKSet, createLocalJWKSet, jwtVerify } = require("jose");
 const { OAuthError, OAuthErrorCode } = require("@modelcontextprotocol/server");
 
-const CANONICAL_ORIGIN = "https://tuhoy.com";
+const CANONICAL_ORIGIN = "https://app.biosense.dev";
 const CANONICAL_RESOURCE = CANONICAL_ORIGIN + "/mcp";
 const RESOURCE_METADATA_PATH = "/.well-known/oauth-protected-resource";
 const RESOURCE_METADATA_PATH_MCP = "/.well-known/oauth-protected-resource/mcp";

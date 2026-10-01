@@ -6,6 +6,7 @@ const { generateKeyPair, exportJWK, SignJWT } = require("jose");
 const { Client, StreamableHTTPClientTransport } = require("@modelcontextprotocol/client");
 const { createApp } = require("../src/api/server");
 const {
+  CANONICAL_ORIGIN,
   CANONICAL_RESOURCE,
   RESOURCE_METADATA_URL,
   SCOPE_READ,
@@ -118,7 +119,7 @@ function oauthConfig(jwks, extra) {
     localJwks: jwks,
     resource: CANONICAL_RESOURCE,
     resourceMetadataUrl: RESOURCE_METADATA_URL,
-    resourceDocumentation: "https://tuhoy.com/api/docs",
+    resourceDocumentation: CANONICAL_ORIGIN + "/api/docs",
     scopesSupported: [SCOPE_READ, SCOPE_SIMULATE]
   }, extra || {});
 }
@@ -142,7 +143,7 @@ test("OAuth protected resource metadata, challenges, and dual MCP auth", async (
     assert.equal(json.resource, CANONICAL_RESOURCE);
     assert.deepEqual(json.authorization_servers, [ISSUER]);
     assert.deepEqual(json.scopes_supported, [SCOPE_READ, SCOPE_SIMULATE]);
-    assert.equal(json.resource_documentation, "https://tuhoy.com/api/docs");
+    assert.equal(json.resource_documentation, CANONICAL_ORIGIN + "/api/docs");
     assert.equal(root.headers.get("access-control-allow-origin"), "*");
   });
 
@@ -151,7 +152,7 @@ test("OAuth protected resource metadata, challenges, and dual MCP auth", async (
     assert.equal(missing.status, 401);
     const challenge = missing.headers.get("www-authenticate") || "";
     assert.match(challenge, /Bearer/i);
-    assert.match(challenge, /resource_metadata="https:\/\/tuhoy\.com\/\.well-known\/oauth-protected-resource"/);
+    assert.match(challenge, /resource_metadata="https:\/\/app\.biosense\.dev\/\.well-known\/oauth-protected-resource"/);
     assert.match(challenge, /scope="biosense:read biosense:simulate"/);
     assert.ok(!missing.text.includes(API_KEY));
   });
@@ -217,7 +218,7 @@ test("OAuth protected resource metadata, challenges, and dual MCP auth", async (
   await t.test("OAuth token with wrong audience is rejected", async () => {
     const token = await signToken(signer.privateKey, {
       scope: SCOPE_READ + " " + SCOPE_SIMULATE,
-      aud: "https://tuhoy.com"
+      aud: "https://app.biosense.dev"
     });
     const denied = await rawMcp(http.url, {
       headers: { Authorization: "Bearer " + token }

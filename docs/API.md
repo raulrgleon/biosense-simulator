@@ -29,7 +29,7 @@ The UI is still served at `/`. The API listens on `PORT` (default 3000).
 | `PORT` | Listen port. Default 3000. |
 | `NODE_ENV` | `production` refuses to start without an API key. |
 | `AUTH0_DOMAIN` | Auth0 tenant host only, for example `your-tenant.us.auth0.com`. Leave unset until the tenant exists. |
-| `AUTH0_AUDIENCE` | Must match the Auth0 API Identifier and the MCP resource: `https://tuhoy.com/mcp`. |
+| `AUTH0_AUDIENCE` | Must match the Auth0 API Identifier and the MCP resource: `https://app.biosense.dev/mcp`. |
 | `AUTH0_ISSUER` | Optional exact issuer override. Defaults to `https://$AUTH0_DOMAIN/`. Must match Auth0 metadata, including the trailing slash. |
 
 ## Authentication
@@ -40,7 +40,7 @@ Authorization: Bearer $BIOSENSE_API_KEY
 
 Public without a key: `GET /api/v1/health`, `GET /openapi.json`, `GET /api/docs`.
 
-The remote MCP endpoint `https://tuhoy.com/mcp` accepts two bearer credentials in parallel:
+The remote MCP endpoint `https://app.biosense.dev/mcp` accepts two bearer credentials in parallel:
 
 ```http
 Authorization: Bearer $BIOSENSE_API_KEY
@@ -49,14 +49,14 @@ Authorization: Bearer <Auth0 access token>
 
 `BIOSENSE_API_KEY` is unchanged for Cursor, the official MCP SDK, and internal tests. REST `/api/v1/*` still accepts only that key.
 
-OAuth 2.1 is for ChatGPT. The MCP resource identifier is `https://tuhoy.com/mcp` (the most specific URI; the origin also serves the UI and REST API). Protected Resource Metadata is published at:
+OAuth 2.1 is for ChatGPT. The MCP resource identifier is `https://app.biosense.dev/mcp` (the most specific URI; the origin also serves the UI and REST API). Protected Resource Metadata is published at:
 
 - `GET /.well-known/oauth-protected-resource`
 - `GET /.well-known/oauth-protected-resource/mcp`
 
 Those documents stay unpublished (404) until `AUTH0_DOMAIN` is configured, so an incomplete Auth0 setup cannot advertise a broken authorization server.
 
-Unauthenticated `/mcp` requests return `401` with `WWW-Authenticate` including `resource_metadata="https://tuhoy.com/.well-known/oauth-protected-resource"` and the scopes below once Auth0 is enabled.
+Unauthenticated `/mcp` requests return `401` with `WWW-Authenticate` including `resource_metadata="https://app.biosense.dev/.well-known/oauth-protected-resource"` and the scopes below once Auth0 is enabled.
 
 OAuth access tokens are verified with Auth0 JWKS: signature, issuer, audience/resource, `exp`, `nbf`, and scopes. A bearer token that merely exists is not trusted.
 
@@ -82,7 +82,7 @@ Transport: MCP Streamable HTTP (official `@modelcontextprotocol/server` v2).
 - `health` is not exposed as a tool
 - MCP calls the shared engine through `src/api/service.js`; it does not HTTP-loopback to `/api/v1`
 
-Connect a compatible MCP client to `https://YOUR_DOMAIN/mcp` with `Authorization: Bearer $BIOSENSE_API_KEY`.
+Connect a compatible MCP client to `https://app.biosense.dev/mcp` with `Authorization: Bearer $BIOSENSE_API_KEY`.
 
 ## OpenAPI
 
@@ -93,7 +93,7 @@ Connect a compatible MCP client to `https://YOUR_DOMAIN/mcp` with `Authorization
 
 ```bash
 curl -X POST \
-  https://YOUR_DOMAIN/api/v1/simulate \
+  https://app.biosense.dev/api/v1/simulate \
   -H "Authorization: Bearer $BIOSENSE_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -120,7 +120,7 @@ curl -X POST \
 import os, requests
 
 r = requests.post(
-    "https://YOUR_DOMAIN/api/v1/simulate",
+    "https://app.biosense.dev/api/v1/simulate",
     headers={"Authorization": "Bearer " + os.environ["BIOSENSE_API_KEY"]},
     json={
         "scenario": "meal",
@@ -138,7 +138,7 @@ print(r.json()["summary"])
 ## JavaScript
 
 ```javascript
-const res = await fetch("https://YOUR_DOMAIN/api/v1/simulate", {
+const res = await fetch("https://app.biosense.dev/api/v1/simulate", {
   method: "POST",
   headers: {
     Authorization: "Bearer " + process.env.BIOSENSE_API_KEY,
@@ -161,7 +161,7 @@ const data = await res.json();
 `parameter` must be an allowlisted path. The same `random_seed` reuses one noise realization.
 
 ```bash
-curl -X POST https://YOUR_DOMAIN/api/v1/sweep \
+curl -X POST https://app.biosense.dev/api/v1/sweep \
   -H "Authorization: Bearer $BIOSENSE_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -183,7 +183,7 @@ curl -X POST https://YOUR_DOMAIN/api/v1/sweep \
 `glucose.drift_na_per_min` is a rate. At time `t` seconds the engine applies `rate * t / 60` nA on the sensor only. The estimator still subtracts the configured constant drift (0 unless you set the engine constant). This is not nA/s.
 
 ```bash
-curl -X POST https://YOUR_DOMAIN/api/v1/sweep \
+curl -X POST https://app.biosense.dev/api/v1/sweep \
   -H "Authorization: Bearer $BIOSENSE_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{

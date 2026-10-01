@@ -104,7 +104,7 @@ test("API contract and shared engine", async (t) => {
         production: true,
         port: 0,
         apiKey: "",
-        allowedOrigins: ["https://tuhoy.com"],
+        allowedOrigins: ["https://app.biosense.dev"],
         rateLimitPerMinute: 60,
         limits: { maxDurationS: 3600, maxSamples: 100000, maxSweepPoints: 100, maxCompareRuns: 50 },
         bodyLimit: "256kb"

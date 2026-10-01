@@ -60,6 +60,12 @@ button { cursor: pointer; }
   margin-bottom: 16px;
 }
 
+.site-link {
+  color: var(--teal);
+  text-decoration: none;
+}
+.site-link:hover { text-decoration: underline; }
+
 .brand {
   display: flex;
   gap: 12px;
