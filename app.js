@@ -2312,17 +2312,17 @@ function svgSeriesChart(title, series, width, height, markers) {
     if (!Number.isFinite(x) || x < xMin || x > xMax) return "";
     const px = xPos(x).toFixed(1);
     return '<line x1="' + px + '" y1="' + padT + '" x2="' + px + '" y2="' + (h - padB)
-      + '" stroke="rgba(226,177,90,0.35)" stroke-width="1" stroke-dasharray="3 3"/>';
+      + '" stroke="rgba(138,112,72,0.35)" stroke-width="1" stroke-dasharray="3 3"/>';
   }).join("");
   const legend = series.map((item, i) => (
     '<text x="' + (padL + i * 160) + '" y="18" fill="' + item.color + '" font-size="11">' + escapeHtml(item.label) + "</text>"
   )).join("");
   return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + w + " " + h + '" width="100%" role="img">'
-    + '<rect width="' + w + '" height="' + h + '" fill="#141c25"/>'
-    + '<text x="' + padL + '" y="14" fill="#8ea0b4" font-size="11">' + escapeHtml(title) + "</text>"
+    + '<rect width="' + w + '" height="' + h + '" fill="#ffffff"/>'
+    + '<text x="' + padL + '" y="14" fill="#626a73" font-size="11">' + escapeHtml(title) + "</text>"
     + legend
-    + '<text x="8" y="' + (padT + 8) + '" fill="#8ea0b4" font-size="10">' + yMax.toFixed(2) + "</text>"
-    + '<text x="8" y="' + (h - 8) + '" fill="#8ea0b4" font-size="10">' + yMin.toFixed(2) + "</text>"
+    + '<text x="8" y="' + (padT + 8) + '" fill="#626a73" font-size="10">' + yMax.toFixed(2) + "</text>"
+    + '<text x="8" y="' + (h - 8) + '" fill="#626a73" font-size="10">' + yMin.toFixed(2) + "</text>"
     + marks
     + paths
     + "</svg>";
@@ -2440,18 +2440,18 @@ function buildHtmlReport(session, chartImages) {
   const images = chartImages || {};
   const stepEvents = (session.transientAnalysis && session.transientAnalysis.events) || [];
   const glucoseSvg = svgSeriesChart("Glucose estimation", [
-    { label: "Actual", color: "#3cbfb4", points: downsamplePoints(session.samples, "time_s", "actual_glucose_mgdl", 800) },
-    { label: "Estimated", color: "#e2b15a", points: downsamplePoints(session.samples, "time_s", "estimated_glucose_mgdl", 800) }
+    { label: "Actual", color: "#3fc5d8", points: downsamplePoints(session.samples, "time_s", "actual_glucose_mgdl", 800) },
+    { label: "Estimated", color: "#8a7048", points: downsamplePoints(session.samples, "time_s", "estimated_glucose_mgdl", 800) }
   ], 640, 220, stepEvents);
   const oxygenSvg = svgSeriesChart("Oxygen (sim · PROVISIONAL)", [
     { label: "Level", color: "#7dcea0", points: downsamplePoints(session.samples, "time_s", "oxygen_level_sim", 800) },
-    { label: "Recovered", color: "#e2b15a", points: downsamplePoints(session.samples, "time_s", "oxygen_recovered_level_sim", 800) }
+    { label: "Recovered", color: "#8a7048", points: downsamplePoints(session.samples, "time_s", "oxygen_recovered_level_sim", 800) }
   ]);
   const tempSvg = svgSeriesChart("Temperature", [
-    { label: "°C", color: "#e2b15a", points: downsamplePoints(session.samples, "time_s", "temperature_c", 800) }
+    { label: "°C", color: "#8a7048", points: downsamplePoints(session.samples, "time_s", "temperature_c", 800) }
   ]);
   const voutSvg = svgSeriesChart("TIA VOUT", [
-    { label: "Glucose", color: "#3cbfb4", points: downsamplePoints(session.samples, "time_s", "tia_vout_v", 800) },
+    { label: "Glucose", color: "#3fc5d8", points: downsamplePoints(session.samples, "time_s", "tia_vout_v", 800) },
     { label: "Oxygen", color: "#8eb7ef", points: downsamplePoints(session.samples, "time_s", "oxygen_tia_vout_v", 800) }
   ]);
   const imageBlock = Object.keys(images).filter((id) => images[id]).map((id) => (
@@ -2468,11 +2468,11 @@ function buildHtmlReport(session, chartImages) {
   return "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"UTF-8\">"
     + "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
     + "<title>BioSense Simulation Report</title><style>"
-    + "body{margin:0;background:#0c1116;color:#e7eef6;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;padding:24px;}"
-    + "h1,h2{letter-spacing:.08em;} .tag{color:#e2b15a;margin-right:8px;} .muted{color:#8ea0b4;}"
-    + "table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums;} td,th{border-bottom:1px solid #243140;padding:6px 8px;text-align:left;}"
-    + "svg,img{max-width:100%;background:#141c25;border:1px solid #243140;border-radius:8px;margin:8px 0;}"
-    + "figure{margin:12px 0;} figcaption{color:#8ea0b4;font-size:12px;}"
+    + "body{margin:0;background:#f7f8fa;color:#0a0d10;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;padding:24px;}"
+    + "h1,h2{letter-spacing:-.03em;} .tag{color:#8a7048;margin-right:8px;} .muted{color:#626a73;}"
+    + "table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums;} td,th{border-bottom:1px solid rgba(10,13,16,.08);padding:6px 8px;text-align:left;}"
+    + "svg,img{max-width:100%;background:#fff;border:1px solid rgba(10,13,16,.08);border-radius:16px;margin:8px 0;}"
+    + "figure{margin:12px 0;} figcaption{color:#626a73;font-size:12px;}"
     + "</style></head><body>"
     + "<h1>BIOSENSE SIMULATOR</h1><h2>SIMULATION REPORT</h2>"
     + "<p><span class=\"tag\">SIMULATION ONLY</span><span class=\"tag\">NOT FOR MEDICAL USE</span><span class=\"tag\">PROVISIONAL</span></p>"
@@ -2624,7 +2624,7 @@ function renderSeriesCanvas(title, series, width, height, markers) {
   canvas.height = height;
   const ctx = canvas.getContext("2d");
   if (!ctx) return null;
-  ctx.fillStyle = "#141c25";
+  ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, width, height);
   const padL = 56;
   const padR = 18;
@@ -2642,7 +2642,7 @@ function renderSeriesCanvas(title, series, width, height, markers) {
       if (point.y > yMax) yMax = point.y;
     });
   });
-  ctx.fillStyle = "#8ea0b4";
+  ctx.fillStyle = "#626a73";
   ctx.font = "14px sans-serif";
   ctx.fillText(title, padL, 22);
   if (!Number.isFinite(xMin) || !Number.isFinite(yMin)) return canvas;
@@ -2657,13 +2657,13 @@ function renderSeriesCanvas(title, series, width, height, markers) {
   const plotH = height - padT - padB;
   function xPos(x) { return padL + ((x - xMin) / xSpan) * plotW; }
   function yPos(y) { return padT + (1 - (y - yMin) / ySpan) * plotH; }
-  ctx.strokeStyle = "#243140";
+  ctx.strokeStyle = "rgba(10,13,16,0.12)";
   ctx.beginPath();
   ctx.moveTo(padL, padT);
   ctx.lineTo(padL, height - padB);
   ctx.lineTo(width - padR, height - padB);
   ctx.stroke();
-  ctx.fillStyle = "#8ea0b4";
+  ctx.fillStyle = "#626a73";
   ctx.font = "11px sans-serif";
   ctx.fillText(String(yMax.toFixed(2)), 8, padT + 8);
   ctx.fillText(String(yMin.toFixed(2)), 8, height - 10);
@@ -2671,7 +2671,7 @@ function renderSeriesCanvas(title, series, width, height, markers) {
     const x = Number.isFinite(mark.x) ? mark.x : mark.start_time_s;
     if (!Number.isFinite(x) || x < xMin || x > xMax) return;
     ctx.save();
-    ctx.strokeStyle = "rgba(226,177,90,0.4)";
+    ctx.strokeStyle = "rgba(138,112,72,0.4)";
     ctx.lineWidth = 1;
     ctx.setLineDash([3, 3]);
     ctx.beginPath();
@@ -2705,18 +2705,18 @@ function collectSessionPdfImages(session) {
   const stepEvents = (session.transientAnalysis && session.transientAnalysis.events) || [];
   const charts = [
     ["Glucose estimation", [
-      { label: "Actual", color: "#3cbfb4", points: downsamplePoints(session.samples, "time_s", "actual_glucose_mgdl", 800) },
-      { label: "Estimated", color: "#e2b15a", points: downsamplePoints(session.samples, "time_s", "estimated_glucose_mgdl", 800) }
+      { label: "Actual", color: "#3fc5d8", points: downsamplePoints(session.samples, "time_s", "actual_glucose_mgdl", 800) },
+      { label: "Estimated", color: "#8a7048", points: downsamplePoints(session.samples, "time_s", "estimated_glucose_mgdl", 800) }
     ], stepEvents],
     ["Oxygen (sim, PROVISIONAL)", [
       { label: "Level", color: "#7dcea0", points: downsamplePoints(session.samples, "time_s", "oxygen_level_sim", 800) },
-      { label: "Recovered", color: "#e2b15a", points: downsamplePoints(session.samples, "time_s", "oxygen_recovered_level_sim", 800) }
+      { label: "Recovered", color: "#8a7048", points: downsamplePoints(session.samples, "time_s", "oxygen_recovered_level_sim", 800) }
     ]],
     ["Temperature", [
-      { label: "C", color: "#e2b15a", points: downsamplePoints(session.samples, "time_s", "temperature_c", 800) }
+      { label: "C", color: "#8a7048", points: downsamplePoints(session.samples, "time_s", "temperature_c", 800) }
     ]],
     ["TIA VOUT", [
-      { label: "Glucose", color: "#3cbfb4", points: downsamplePoints(session.samples, "time_s", "tia_vout_v", 800) },
+      { label: "Glucose", color: "#3fc5d8", points: downsamplePoints(session.samples, "time_s", "tia_vout_v", 800) },
       { label: "Oxygen", color: "#8eb7ef", points: downsamplePoints(session.samples, "time_s", "oxygen_tia_vout_v", 800) }
     ]]
   ];
@@ -3244,7 +3244,7 @@ const glucoseStepMarkerPlugin = {
       const x = xScale.getPixelForValue(ev.start_time_s);
       if (x < area.left || x > area.right) return;
       ctx.beginPath();
-      ctx.strokeStyle = "rgba(226, 177, 90, 0.32)";
+      ctx.strokeStyle = "rgba(138, 112, 72, 0.32)";
       ctx.lineWidth = 1;
       ctx.setLineDash([3, 4]);
       ctx.moveTo(x, area.top);
@@ -3294,21 +3294,21 @@ function initCharts() {
   if (STATE.charts) {
     Object.keys(STATE.charts).forEach((key) => STATE.charts[key].destroy());
   }
-  Chart.defaults.color = "#8ea0b4";
-  Chart.defaults.borderColor = "rgba(255,255,255,0.06)";
+  Chart.defaults.color = "#626a73";
+  Chart.defaults.borderColor = "rgba(10,13,16,0.08)";
   Chart.defaults.font.family = CONFIG_FONT();
 
   const axisX = {
     type: "linear",
-    title: { display: true, text: "Time (s)", color: "#8ea0b4" },
-    ticks: { color: "#8ea0b4", maxTicksLimit: 6, callback: (value) => Number(value).toFixed(0) },
-    grid: { color: "rgba(255,255,255,0.05)" }
+    title: { display: true, text: "Time (s)", color: "#626a73" },
+    ticks: { color: "#626a73", maxTicksLimit: 6, callback: (value) => Number(value).toFixed(0) },
+    grid: { color: "rgba(10,13,16,0.06)" }
   };
   function axisY(title) {
     return {
-      title: { display: true, text: title, color: "#8ea0b4" },
-      ticks: { color: "#8ea0b4", maxTicksLimit: 6 },
-      grid: { color: "rgba(255,255,255,0.05)" }
+      title: { display: true, text: title, color: "#626a73" },
+      ticks: { color: "#626a73", maxTicksLimit: 6 },
+      grid: { color: "rgba(10,13,16,0.06)" }
     };
   }
   function baseOptions(yTitle, showLegend) {
@@ -3321,17 +3321,17 @@ function initCharts() {
           display: showLegend,
           labels: {
             boxWidth: 12,
-            color: "#c5d2e0",
+            color: "#0a0d10",
             filter(item) { return item.text !== "Step event"; }
           }
         },
         tooltip: {
           intersect: false,
           mode: "index",
-          backgroundColor: "#1a2430",
-          titleColor: "#e7eef6",
-          bodyColor: "#d5dde6",
-          borderColor: "#314256",
+          backgroundColor: "#ffffff",
+          titleColor: "#0a0d10",
+          bodyColor: "#626a73",
+          borderColor: "rgba(10,13,16,0.08)",
           borderWidth: 1
         }
       },
@@ -3355,14 +3355,14 @@ function initCharts() {
       type: "line",
       data: {
         datasets: [
-          line("Actual glucose", "#3cbfb4", false),
-          line("Estimated glucose", "#e2b15a", true),
+          line("Actual glucose", "#3fc5d8", false),
+          line("Estimated glucose", "#8a7048", true),
           {
             label: "Step event",
             data: [],
             showLine: false,
-            borderColor: "rgba(226,177,90,0.55)",
-            backgroundColor: "rgba(226,177,90,0.4)",
+            borderColor: "rgba(138,112,72,0.55)",
+            backgroundColor: "rgba(138,112,72,0.4)",
             pointRadius: 3,
             pointHoverRadius: 5,
             pointHitRadius: 8
@@ -3393,19 +3393,19 @@ function initCharts() {
     }),
     current: new Chart(document.getElementById("chart-current"), {
       type: "line",
-      data: { datasets: [line("Sensor current", "#8eb7ef", false), line("Recovered current", "#e2b15a", true)] },
+      data: { datasets: [line("Sensor current", "#8eb7ef", false), line("Recovered current", "#8a7048", true)] },
       options: baseOptions("nA", true)
     }),
     vout: new Chart(document.getElementById("chart-vout"), {
       type: "line",
-      data: { datasets: [line("TIA VOUT", "#3cbfb4", false), line("Filtered VOUT", "#d2c4ff", true)] },
+      data: { datasets: [line("TIA VOUT", "#3fc5d8", false), line("Filtered VOUT", "#d2c4ff", true)] },
       options: baseOptions("volts", true)
     }),
     adc: new Chart(document.getElementById("chart-adc"), {
       type: "line",
       data: {
         datasets: [
-          line("ADC CH1 glucose", "#e7eef6", false),
+          line("ADC CH1 glucose", "#0a0d10", false),
           line("ADC CH2 oxygen", "#8eb7ef", true)
         ]
       },
@@ -3416,7 +3416,7 @@ function initCharts() {
       data: {
         datasets: [
           line("Oxygen level", "#7dcea0", false),
-          line("Recovered oxygen", "#e2b15a", true)
+          line("Recovered oxygen", "#8a7048", true)
         ]
       },
       options: baseOptions("sim · PROVISIONAL", true)
@@ -3426,7 +3426,7 @@ function initCharts() {
       data: {
         datasets: [
           line("Oxygen sensor current", "#8eb7ef", false),
-          line("Recovered oxygen current", "#e2b15a", true)
+          line("Recovered oxygen current", "#8a7048", true)
         ]
       },
       options: baseOptions("nA", true)
@@ -3435,7 +3435,7 @@ function initCharts() {
       type: "line",
       data: {
         datasets: [
-          line("Oxygen TIA VOUT", "#3cbfb4", false),
+          line("Oxygen TIA VOUT", "#3fc5d8", false),
           line("Filtered VOUT", "#d2c4ff", true)
         ]
       },
@@ -3446,7 +3446,7 @@ function initCharts() {
       data: {
         datasets: [
           Object.assign(line("Oxygen", "#7dcea0", false), { yAxisID: "y" }),
-          Object.assign(line("Temperature", "#e2b15a", false), { yAxisID: "y1" })
+          Object.assign(line("Temperature", "#8a7048", false), { yAxisID: "y1" })
         ]
       },
       options: environmentOptions(baseOptions, axisY)

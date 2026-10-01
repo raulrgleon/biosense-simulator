@@ -3,27 +3,41 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="color-scheme" content="dark">
+  <meta name="color-scheme" content="light">
   <title>BioSense Simulator</title>
   <meta name="description" content="Local engineering simulator for BioSense glucose, oxygen, and temperature channels. Simulation only. Not for medical use.">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <div class="app">
-    <header class="topbar">
-      <div class="brand">
-        <div class="brand-mark" aria-hidden="true"></div>
-        <div>
-          <h1>BIOSENSE SIMULATOR</h1>
-          <p class="subtitle">Glucose, oxygen, and temperature sensor development environment · <a class="site-link" href="https://biosense.dev">biosense.dev</a></p>
-        </div>
+    <header class="site-nav">
+      <a class="wordmark" href="https://biosense.dev">
+        <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
+          <circle cx="16" cy="16" r="14" fill="none" stroke="currentColor" stroke-width="1.1"/>
+          <circle cx="16" cy="16" r="5.5" fill="none" stroke="currentColor" stroke-width="1.1"/>
+          <circle cx="16" cy="16" r="1.7" fill="currentColor"/>
+        </svg>
+        <span>BioSense</span>
+      </a>
+      <nav class="site-nav-links" aria-label="Primary">
+        <span aria-current="page">Simulator</span>
+        <a href="https://biosense.dev">Product</a>
+        <a class="nav-cta" href="https://biosense.dev/#waitlist">Join waitlist</a>
+      </nav>
+    </header>
+
+    <div class="page-intro">
+      <div>
+        <p class="brand-kicker">Currently in R&amp;D</p>
+        <h1>Simulator</h1>
+        <p class="subtitle">Glucose, oxygen, and temperature development bench.</p>
       </div>
       <div class="badges">
         <span class="badge badge-sim">SIMULATION ONLY</span>
         <span class="badge badge-warn">NOT FOR MEDICAL USE</span>
         <span class="badge" id="selftest-badge">SELF-TEST</span>
       </div>
-    </header>
+    </div>
 
     <p class="callout" lang="es">
       Modelo provisional de simulación.
@@ -667,6 +681,7 @@
     <footer class="footer">
       <p><strong>SIMULATED · NOT FOR MEDICAL USE.</strong> BioSense Simulator is an engineering bench for three channels: glucose, oxygen, and temperature. It does not measure tissue and it does not produce clinical guidance.</p>
       <p>GLUCOSE CALIBRATION — PROVISIONAL. OXYGEN MODEL — PROVISIONAL. TEMPERATURE COMPENSATION — PROVISIONAL. None of these coefficients is a characterized sensor.</p>
+      <p><a class="site-link" href="https://biosense.dev">biosense.dev</a></p>
     </footer>
   </div>
   <script src="vendor/chart.umd.min.js"></script>
